@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+config.json
+request_log.json
+cache/
+questions/
+test_capture.png
+test_window_grab.png
+build/
+dist/
+*.spec

@@ -1,0 +1,139 @@
+# -*- coding: utf-8 -*-
+"""百炼(DashScope)OpenAI 兼容接口客户端。
+
+请求体由 config.json 中的 request_template 决定(JSON 模板),
+支持占位符 {model} / {prompt} / {image_url}。
+"""
+import base64
+import io
+import json
+import re
+import time
+
+import requests
+from PIL import Image
+
+from app.config import DEFAULT_REQUEST_TEMPLATE
+
+
+class AgentError(Exception):
+    """带用户友好信息的接口错误。"""
+
+
+class AgentClient:
+    def __init__(self, api_key: str, model: str, api_base: str,
+                 request_template: str = "", timeout: int = 180,
+                 max_side: int = 2048, max_retries: int = 3,
+                 backoff: float = 0.8, enable_thinking: bool = False):
+        self.api_key = (api_key or "").strip()
+        self.model = (model or "").strip()
+        self.api_base = (api_base or "").strip()
+        self.request_template = request_template or DEFAULT_REQUEST_TEMPLATE
+        self.timeout = timeout
+        self.max_side = max_side
+        self.max_retries = max(1, max_retries)
+        self.backoff = backoff
+        self.enable_thinking = enable_thinking
+
+    def _encode_image(self, image: bytes) -> str:
+        """PNG 字节 -> base64;长边超过 max_side 时等比压缩,防止接口拒绝。"""
+        img = Image.open(io.BytesIO(image))
+        w, h = img.size
+        if max(w, h) > self.max_side:
+            ratio = self.max_side / max(w, h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode()
+
+    def _build_payload(self, prompt: str, image: bytes) -> dict:
+        """按模板生成请求体;占位符以 JSON 转义后的值替换,并注入思考开关。"""
+        if not self.api_key:
+            raise AgentError("未配置 API Key,请点击「配置」填写")
+        image_url = "data:image/png;base64," + self._encode_image(image)
+        body = (
+            self.request_template
+            .replace("{model}", json.dumps(self.model, ensure_ascii=False))
+            .replace("{prompt}", json.dumps(prompt, ensure_ascii=False))
+            .replace("{image_url}", json.dumps(image_url))
+        )
+        # 按平台的「是否开启思考」注入
+        body = re.sub(
+            r'"enable_thinking"\s*:\s*(true|false)',
+            f'"enable_thinking": {str(bool(self.enable_thinking)).lower()}',
+            body,
+        )
+        try:
+            return json.loads(body)
+        except Exception as exc:
+            raise AgentError(f"请求JSON模板无效:{exc}") from exc
+
+    def _chat(self, prompt: str, image: bytes) -> str:
+        """发送请求;网络错误与 5xx/429 自动重试(指数退避)。"""
+        payload = self._build_payload(prompt, image)
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        last_err = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = requests.post(self.api_base, headers=headers,
+                                     json=payload, timeout=self.timeout)
+            except requests.RequestException as exc:
+                last_err = exc
+            else:
+                if resp.status_code in (429, 500, 502, 503, 504) and attempt < self.max_retries - 1:
+                    last_err = f"接口返回 {resp.status_code}"
+                elif resp.status_code != 200:
+                    detail = ""
+                    try:
+                        detail = resp.json().get("error", {}).get("message", resp.text[:300])
+                    except Exception:
+                        detail = resp.text[:300]
+                    raise AgentError(f"接口返回 {resp.status_code}:{detail}")
+                else:
+                    try:
+                        data = resp.json()
+                        return data["choices"][0]["message"]["content"]
+                    except (KeyError, IndexError, ValueError) as exc:
+                        raise AgentError(f"接口响应解析失败:{resp.text[:300]}") from exc
+            if attempt < self.max_retries - 1:
+                time.sleep(self.backoff * (attempt + 1))
+        raise AgentError(f"网络请求失败(已重试 {self.max_retries} 次):{last_err}")
+
+    # ---------- 业务 ----------
+    def ocr(self, image: bytes, prompt: str) -> str:
+        """第一步:云端 OCR,只返回识别到的文字。"""
+        return self._chat(prompt, image)
+
+    def answer(self, image: bytes, prompt: str) -> str:
+        """第二步:结合截图与 OCR 文字回答问题(prompt 已由调用方拼好)。"""
+        return self._chat(prompt, image)
+
+    def test_connection(self) -> str:
+        """最小化连通性测试:发送纯文本 ping,返回结果说明。"""
+        if not self.api_key:
+            return "未配置 API Key"
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            resp = requests.post(self.api_base, headers=headers,
+                                 json=payload, timeout=min(self.timeout, 20))
+        except requests.RequestException as exc:
+            return f"连接失败:{exc}"
+        if resp.status_code == 200:
+            return "连接成功"
+        detail = ""
+        try:
+            detail = resp.json().get("error", {}).get("message", resp.text[:200])
+        except Exception:
+            detail = resp.text[:200]
+        return f"失败({resp.status_code}):{detail}"
