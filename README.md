@@ -1,5 +1,7 @@
 # OCR 助手
 
+[简体中文](README.md) | [English](README.en.md)
+
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![PySide6](https://img.shields.io/badge/GUI-PySide6-green?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white)
