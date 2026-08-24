@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
 """请求记录:最近请求的成功/失败与耗时,供「关于应用」的 GitHub 风格绿块图展示。"""
 import json
+import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parent.parent
 LOG_PATH = ROOT / "request_log.json"
 MAX_RECORDS = 500
 

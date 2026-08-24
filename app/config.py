@@ -6,9 +6,14 @@ providers(多AI平台) / request_template / window / theme / capture / retry /
 timeout / knowledge / hotkeys / behavior / storage / app。
 """
 import json
+import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+if getattr(sys, "frozen", False):
+    # PyInstaller 冻结模式:以 exe 所在目录为基准,保证配置/缓存可持久化
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.json"
 
 DEFAULT_OCR_PROMPT = (
