@@ -79,27 +79,6 @@ python -m venv .venv
 
 可在 `config.json` 的 `hotkeys` 中修改。
 
-## 构建打包(Windows)
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install pyinstaller
-.\.venv\Scripts\pyinstaller.exe --noconfirm --windowed --onefile --name "OCR助手" `
-  --collect-all rapidocr_onnxruntime main.py
-```
-
-产物位于 `dist\OCR助手.exe`,按版本发布到 [Releases](../../releases)。
-
-## 自测脚本
-
-```powershell
-.\.venv\Scripts\python.exe scripts\test_parser.py      # 题目解析 + 知识库单元测试
-.\.venv\Scripts\python.exe scripts\test_dialogs.py     # 设置/主题对话框冒烟测试
-.\.venv\Scripts\python.exe scripts\test_window.py      # 窗口/截图/缩放测试
-.\.venv\Scripts\python.exe scripts\test_collapse.py    # 折叠与窗口跟随测试
-.\.venv\Scripts\python.exe scripts\test_local_ocr.py   # 本地 OCR(RapidOCR)测试
-.\.venv\Scripts\python.exe scripts\smoke.py            # 真实调用所选平台验证全链路(需已配置 API Key)
-```
-
 ## 常见问题
 
 - **状态栏显示"Key 未配置"**:在「配置 → 模型设置」为当前平台填写 API Key。
