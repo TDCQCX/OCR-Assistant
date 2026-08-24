@@ -10,3 +10,4 @@ test_window_grab.png
 build/
 dist/
 *.spec
+version_info.txt

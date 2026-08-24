@@ -152,8 +152,8 @@ DEFAULT_CONFIG = {
     },
     "app": {
         "version": "1.0.0",
-        "github": "https://github.com/yourname/yourrepo",  # 关于页跳转地址
-        "qq_group": "",
+        "github": "https://github.com/TDCQCX/OCR-Assistant",  # 关于页跳转地址
+        "qq_group": "1108236960",
         "license": "MIT",
         "features": "透明洞口截图 · 云端/本地OCR · 图文答题 · 多平台 · 本地知识库",
     },
