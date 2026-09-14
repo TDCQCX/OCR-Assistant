@@ -356,19 +356,21 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 .rs-sw { bottom: 0; left: 0; width: 10px; height: 10px; cursor: nesw-resize; }
 .rs-se { bottom: 0; right: 0; width: 10px; height: 10px; cursor: nwse-resize; }
 
-/* ============================ 翻译模式 ============================ */
-.translate-pairs { @apply space-y-3; }
-.pair-block { @apply pb-2.5; }
-.pair-block + .pair-block { border-top: 1px solid var(--c-line); padding-top: 10px; }
-.pair-src {
-  @apply leading-relaxed whitespace-pre-wrap;
+/* ============================ 翻译模式(原文完整显示,译文在下,无分割线) ============================ */
+.translate-doc { @apply space-y-3; }
+.doc-block { @apply min-w-0; }
+.doc-head {
+  @apply flex items-center gap-2 mb-1.5 text-[12px] font-medium;
   color: var(--c-muted);
-  font-size: 12.5px;
 }
-.pair-dst {
-  @apply leading-relaxed whitespace-pre-wrap mt-1;
-  font-size: 14px;
+.doc-src {
+  @apply whitespace-pre-wrap leading-relaxed;
+  font-size: 13px;
+  color: var(--c-muted);
 }
+.doc-dst { @apply whitespace-pre-wrap leading-relaxed; font-size: 15px; }
+.doc-line { margin: 0 0 6px; }
+.doc-line:last-child { margin-bottom: 0; }
 .mode-enter { animation: slidein .2s ease-out; }
 @keyframes slidein {
   from { opacity: 0; transform: translateY(6px) scale(.995); }

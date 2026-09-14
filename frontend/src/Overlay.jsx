@@ -29,7 +29,10 @@ export default function Overlay() {
   const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)
   const small = useSmallWindow()
 
-  useEffect(() => { call('list_providers').then((p) => { setProviders(p.list || []); setActive(p.active) }) }, [])
+  useEffect(() => {
+    call('list_providers').then((p) => { setProviders(p.list || []); setActive(p.active) })
+    call('last_result').then((r) => { if (r && (r.answer || r.ocr_text)) app.setResult(r) })
+  }, [])
 
   // 顶部只显示当前模型与状态(点击进入设置切换)
   const curProv = providers.find((p) => p.id === active) || {}

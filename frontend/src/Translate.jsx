@@ -16,7 +16,6 @@ const MODES = [
 const DISPLAYS = [
   { value: 'bilingual', label: '双语对照' },
   { value: 'translated', label: '仅译文' },
-  { value: 'source', label: '仅原文' },
 ]
 
 /** 翻译模式:无洞口,结果区放大;支持双语逐行对照与端侧/云端翻译 */
@@ -32,7 +31,11 @@ export default function Translate() {
   const [display, setDisplay] = useState(tr.display || 'bilingual')
   const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)
 
-  useEffect(() => { call('languages').then((r) => setLangs(r.list || [])) }, [])
+  useEffect(() => {
+    call('languages').then((r) => setLangs(r.list || []))
+    // 窗口刚显示时页面可能还没就绪,主动回拉最近一次结果
+    call('last_result').then((r) => { if (r && (r.pairs || r.ocr_text)) app.setResult(r) })
+  }, [])
   useEffect(() => setDisplay(tr.display || 'bilingual'), [tr.display])
 
   const setTr = async (patch) => {
@@ -127,52 +130,48 @@ export default function Translate() {
               placeholder="附加要求(可选):例如「保持专业术语」「译文更口语化」「只翻译正文」…" />
       </div>
 
-      {/* 结果区:原文 / 译文 大面板 */}
-      <div className="flex-1 min-h-0 px-2.5 py-2 grid grid-cols-2 gap-2.5">
-        <section className="card p-0 flex flex-col min-h-0">
-          <div className="flex items-center gap-2 px-3 h-9 border-b shrink-0" style={{ borderColor: 'var(--c-line)' }}>
-            <Icon name="text" size={14} className="text-muted" />
-            <span className="font-semibold text-[12.5px]">识别原文</span>
-            <span className="chip">{tr.source_lang || '自动检测'}</span>
-            <span className="flex-1" />
-            <span className="hint">{(result?.ocr_text || '').length} 字</span>
+      {/* 结果区:原文完整显示在上,译文在下(不再逐段卡片与分割线) */}
+      <div className="flex-1 min-h-0 px-2.5 py-2 overflow-auto">
+        {result?.error ? (
+          <div className="flex items-start gap-2 text-[12.5px] p-2" style={{ color: 'var(--c-danger)' }}>
+            <Icon name="alert" size={14} className="mt-0.5" />
+            <span>{result.error}</span>
           </div>
-          <pre className="flex-1 min-h-0 overflow-auto whitespace-pre-wrap text-[12.5px] leading-relaxed p-2.5 m-0">
-            {result?.ocr_text || '识别原文将显示在这里'}
-          </pre>
-        </section>
-
-        <section className="card p-0 flex flex-col min-h-0">
-          <div className="flex items-center gap-2 px-3 h-9 border-b shrink-0" style={{ borderColor: 'var(--c-line)' }}>
-            <Icon name="translate" size={14} className="text-muted" />
-            <span className="font-semibold text-[12.5px]">译文</span>
-            <span className="chip">{tr.target_lang || '中文'}</span>
-            {result?.engine && <span className="chip">{result.engine}</span>}
-            <span className="flex-1" />
-            {result?.answer_time > 0 && <span className="hint">{result.answer_time.toFixed(1)}s</span>}
-          </div>
-          <div className="flex-1 min-h-0 overflow-auto p-2.5">
-            {result?.error ? (
-              <div className="flex items-start gap-2 text-[12.5px]" style={{ color: 'var(--c-danger)' }}>
-                <Icon name="alert" size={14} className="mt-0.5" />
-                <span>{result.error}</span>
-              </div>
-            ) : pairs.length ? (
-              <div className="translate-pairs">
-                {pairs.map((p, i) => (
-                  <div className="pair-block" key={i}>
-                    {display !== 'translated' && <div className="pair-src">{p.src || '—'}</div>}
-                    {display !== 'source' && <div className="pair-dst">{p.dst || '—'}</div>}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="hint">
-                还没有翻译结果:点击「捕获并翻译」复用上次区域,或点「框选新区域」(Ctrl+Shift+A)选择要翻译的内容。
-              </div>
+        ) : pairs.length || result?.ocr_text ? (
+          <div className="translate-doc">
+            {display === 'bilingual' && (
+              <section className="doc-block">
+                <div className="doc-head">
+                  <Icon name="text" size={13} className="text-muted" />
+                  <span>原文</span>
+                  <span className="chip">{tr.source_lang || '自动检测'}</span>
+                  <span className="flex-1" />
+                  <span className="hint">{(result?.ocr_text || '').length} 字</span>
+                </div>
+                <div className="doc-src">{result?.ocr_text || '—'}</div>
+              </section>
             )}
+            <section className="doc-block">
+              <div className="doc-head">
+                <Icon name="translate" size={13} className="text-muted" />
+                <span>译文</span>
+                <span className="chip">{tr.target_lang || '中文'}</span>
+                {result?.engine && <span className="chip">{result.engine}</span>}
+                <span className="flex-1" />
+                {result?.answer_time > 0 && <span className="hint">{result.answer_time.toFixed(1)}s</span>}
+              </div>
+              <div className="doc-dst">
+                {pairs.length
+                  ? pairs.map((p, i) => <p key={i} className="doc-line">{p.dst || '—'}</p>)
+                  : (result?.answer || '—')}
+              </div>
+            </section>
           </div>
-        </section>
+        ) : (
+          <div className="hint p-2">
+            还没有翻译结果:点击「捕获并翻译」复用上次区域,或点「框选新区域」(Ctrl+Shift+A)选择要翻译的内容。
+          </div>
+        )}
       </div>
 
       {/* 状态行 */}

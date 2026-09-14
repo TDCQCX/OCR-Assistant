@@ -47,6 +47,7 @@ class App:
         self._hole_key = None
         self._prev_mode = None
         self._translate_mode = False
+        self._last_result = {}
         self._auto_thread = None
         self._auto_stop = threading.Event()
         # 前端事件统一由独立线程推送:evaluate_js 会阻塞等待 JS 结果,
@@ -216,6 +217,11 @@ class App:
             cfgmod.save_config(self.cfg)
 
         run_in_main(do)
+        if self._last_result:
+            def replay():
+                time.sleep(1.6)
+                self.push({"type": "result", "data": self._last_result})
+            threading.Thread(target=replay, daemon=True).start()
         if mode != "translate":
             self._stop_auto_refresh()
         # 翻译模式:窗口消失前先记录位置
@@ -734,9 +740,14 @@ class App:
         return ""
 
     def _on_result(self, data: dict):
+        self._last_result = data
         self.push({"type": "result", "data": data})
         self.push({"type": "history", "data": history.load()})
         self._save_outputs(data)
+
+    def last_result(self) -> dict:
+        """最近一次结果:窗口(尤其翻译窗)刚显示时页面可能还没就绪,事件会丢,故支持主动回拉。"""
+        return self._last_result or {}
 
     def _save_outputs(self, data: dict):
         storage = self.cfg.get("storage") or {}

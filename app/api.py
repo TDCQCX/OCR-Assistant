@@ -348,6 +348,10 @@ class Api:
         from app.clipboard import copy_text as _copy
         return _copy(text)
 
+    def last_result(self) -> dict:
+        """最近一次识别/翻译结果(供窗口刚显示时主动回拉,避免丢事件)。"""
+        return self.app.last_result()
+
     # ================= 提问记忆(自输入自动保存) =================
     def remember_question(self, text: str) -> list:
         text = (text or "").strip()

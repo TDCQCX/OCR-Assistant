@@ -70,7 +70,7 @@ def translate_segments(segments: list, source_lang: str, target_lang: str) -> li
     with _lock:
         translator, sp = _load(source_lang, target_lang)
         batch = [sp.encode(s, out_type=str) for s in segments]
-        results = translator.translate_batch(batch, beam_size=2, max_decoding_length=320,
+        results = translator.translate_batch(batch, beam_size=4, max_decoding_length=320,
                                              max_batch_size=16)
         out = []
         for item in results:
