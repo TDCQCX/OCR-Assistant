@@ -342,6 +342,12 @@ class Api:
         from app import local_models
         return local_models.remove(str(kind))
 
+    # ================= 剪贴板 =================
+    def copy_text(self, text: str) -> bool:
+        """由后端写入系统剪贴板(WebView 内的 navigator.clipboard 常静默失败)。"""
+        from app.clipboard import copy_text as _copy
+        return _copy(text)
+
     # ================= 提问记忆(自输入自动保存) =================
     def remember_question(self, text: str) -> list:
         text = (text or "").strip()

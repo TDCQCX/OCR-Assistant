@@ -651,7 +651,7 @@ function HistoryPage() {
                 <span className="chip">{h.source}</span>
                 <span className="hint">{h.time}</span>
                 <span className="flex-1" />
-                <Btn onClick={() => { navigator.clipboard.writeText(h.answer || ''); toast('已复制') }}>复制</Btn>
+                <Btn onClick={async () => { const ok = await call('copy_text', h.answer || ''); toast(ok ? '已复制' : '复制失败', ok ? 'ok' : 'danger') }}>复制</Btn>
               </div>
               <div className="text-[12px] text-muted line-clamp-2">{h.ocr_text}</div>
               <div className="text-[13px] mt-1 whitespace-pre-wrap">{h.answer}</div>
@@ -711,7 +711,7 @@ function AboutPage() {
           <div className="flex items-center gap-2">
             <span className="w-[110px]">QQ 交流群</span>
             <span className="flex-1">{about.qq_group || '暂未创建'}</span>
-            {about.qq_group && <Btn onClick={() => { navigator.clipboard.writeText(about.qq_group) }}>复制群号</Btn>}
+            {about.qq_group && <Btn onClick={async () => { const ok = await call('copy_text', about.qq_group); toast(ok ? '已复制群号' : '复制失败', ok ? 'ok' : 'danger') }}>复制群号</Btn>}
           </div>
         </div>
       </Card>

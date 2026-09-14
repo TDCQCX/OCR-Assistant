@@ -112,8 +112,10 @@ export default function Translate() {
           {busy ? '处理中' : '捕获并翻译'}
         </Btn>
         <IconBtn icon="snip" tip="框选新区域并翻译" onClick={() => call('snip_translate')} />
-        <IconBtn icon="copy" tip="复制译文" onClick={() => {
-          navigator.clipboard.writeText(pairs.map((p) => p.dst).join('\n')); toast('已复制译文')
+        <IconBtn icon="copy" tip="复制译文" onClick={async () => {
+          const text = pairs.map((p) => p.dst).filter(Boolean).join('\n')
+          const ok = await call('copy_text', text)
+          toast(ok ? '已复制译文' : '复制失败', ok ? 'ok' : 'danger')
         }} />
         <IconBtn icon="trash" tip="清空结果" onClick={() => app.setResult(null)} />
       </div>

@@ -578,16 +578,46 @@ class App:
         """重新捕获上一次框选区域并翻译(翻译模式的主操作)。"""
         rect = (self.cfg.get("capture") or {}).get("last_rect")
         if not rect:
-            self.push({"type": "error", "text": "还没有捕获区域:请先点击「框选内容」选择要翻译的区域"})
+            self.push({"type": "error", "text": "还没有捕获区域:请先框选一次要翻译的内容"})
+            self.start_snip_translate()
             return
         self.push({"type": "status", "text": "正在捕获区域…", "tone": "working"})
-        try:
-            png = grab_region(int(rect["left"]), int(rect["top"]), int(rect["w"]), int(rect["h"]))
-        except CaptureError as exc:
-            self.push({"type": "error", "text": str(exc)})
+        # 关键:翻译窗口是不透明的,必须先隐藏自身再截图,否则会把本程序界面一起拍进去
+        png = self._grab_with_windows_hidden(rect)
+        if png is None:
             return
         self._translate_mode = True
         self._run(png, question, task="translate")
+
+    def _grab_with_windows_hidden(self, rect: dict):
+        """截图前隐藏本程序的窗口(翻译窗/迷你条),避免拍到自身界面。"""
+        delay = max(0.08, int(self.cfg["capture"].get("flash_delay_ms", 80)) / 1000.0 + 0.06)
+        hidden = []
+
+        def hide():
+            for name, win in (("translate", self.translate), ("mini", self.mini)):
+                try:
+                    if win is not None and win.visible:
+                        win.hide()
+                        hidden.append(win)
+                except Exception:
+                    pass
+
+        run_in_main(hide)
+        time.sleep(delay)
+        try:
+            return grab_region(int(rect["left"]), int(rect["top"]), int(rect["w"]), int(rect["h"]))
+        except CaptureError as exc:
+            self.push({"type": "error", "text": str(exc)})
+            return None
+        finally:
+            def restore():
+                for win in hidden:
+                    try:
+                        win.show()
+                    except Exception:
+                        pass
+            run_in_main(restore)
 
     def start_snip_translate(self):
         self._prev_mode = "translate"

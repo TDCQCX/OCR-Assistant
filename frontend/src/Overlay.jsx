@@ -152,9 +152,10 @@ export default function Overlay() {
     toast(cloud ? '识别:云端' : '识别:端侧(离线)')
   }
 
-  const copy = () => {
-    navigator.clipboard.writeText(result?.error ? '' : (result?.answer || ''))
-    toast('已复制回答')
+  const copy = async () => {
+    const text = result?.error ? '' : (result?.answer || '')
+    const ok = await call('copy_text', text)
+    toast(ok ? '已复制回答' : '复制失败', ok ? 'ok' : 'danger')
   }
 
   const modeTone = { idle: 'ok', working: 'warn', ok: 'ok', danger: 'danger' }[status.tone] || 'muted'
