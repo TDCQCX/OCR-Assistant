@@ -59,7 +59,45 @@ class App:
         self._create_windows()
         self._register_hotkeys()
         # Qt(WebEngine)后端:透明/无边框/置顶/拖拽均支持
-        webview.start(gui="qt", debug=False)
+        webview.start(self._bootstrap, gui="qt", debug=False)
+
+    def _bootstrap(self):
+        """启动后校正窗口可见性,并按模式摆好位置。"""
+        time.sleep(1.5)
+        self._sync_visibility()
+        time.sleep(3)
+        self._sync_visibility()
+
+    def _sync_visibility(self):
+        """只保留当前模式对应的窗口可见(hidden 参数在部分后端不可靠)。"""
+        mode = self.cfg.get("mode") or "overlay"
+        if mode not in ("overlay", "mini", "translate"):
+            mode = "overlay"
+
+        def do():
+            for name, win in (("overlay", self.overlay), ("mini", self.mini),
+                              ("translate", self.translate)):
+                if win is None:
+                    continue
+                try:
+                    win.show() if name == mode else win.hide()
+                except Exception:
+                    pass
+            try:
+                self.settings.hide()
+                self.snip.hide()
+            except Exception:
+                pass
+            if mode == "mini":
+                self._place_mini_default()
+            elif mode == "translate":
+                self._place_translate_default()
+
+        run_in_main(do)
+
+    def _on_window_loaded(self):
+        """窗口内容加载完成后再次校正可见性(避免被后创建的窗口盖过)。"""
+        self._sync_visibility()
 
     def _push_loop(self):
         while True:
@@ -117,6 +155,11 @@ class App:
         self.translate.events.closed += self.quit_app
         self.settings.events.closed += self._on_settings_closed
         self.snip.events.closed += self._on_snip_closed
+        for win in (self.overlay, self.mini, self.translate):
+            try:
+                win.events.loaded += self._on_window_loaded
+            except Exception:
+                pass
 
     def _on_settings_closed(self):
         self.cfg = cfgmod.load_config()
