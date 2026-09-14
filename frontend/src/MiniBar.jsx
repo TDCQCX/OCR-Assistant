@@ -35,7 +35,7 @@ export default function MiniBar() {
         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tone }} />
         <span className="truncate text-[12px] text-muted flex-1 min-w-0">{preview}</span>
         <IconSeg size="sm" value="mini" options={MODES} onChange={(m) => app.setMode(m)} />
-        <EngineSwitch cloud={(cfg.ocr?.mode || 'cloud') === 'cloud'} onChange={toggleOcr} tips={['云端识别', '端侧识别']} />
+        <EngineSwitch cloud={(cfg.ocr?.mode || 'cloud') === 'cloud'} onChange={toggleOcr} tips={['云端', '本地']} />
         <IconBtn icon="scan" tip={busy ? '处理中…' : '框选识别(Ctrl+Shift+A)'} primary disabled={busy}
                  onClick={() => call('run_mini_capture', question)} />
         <IconBtn icon="snip" tip="框选新区域" onClick={() => app.startSnip()} />

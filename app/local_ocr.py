@@ -22,9 +22,18 @@ def _get_engine():
             from rapidocr_onnxruntime import RapidOCR
         except ImportError as exc:
             raise RuntimeError(
-                "本地 OCR 模型未安装:请执行 pip install rapidocr_onnxruntime"
+                "本地 OCR 未安装:请在「设置 → 翻译设置 → 端侧模型」下载,或执行 pip install rapidocr_onnxruntime"
             ) from exc
-        _engine = RapidOCR()
+        # 优先使用按需下载的端侧模型(打包版不内置),否则回退到包内模型
+        from app import local_models
+        paths = local_models.ocr_model_paths()
+        try:
+            _engine = RapidOCR(
+                det_model_path=paths.get("det"), rec_model_path=paths.get("rec"),
+                cls_model_path=paths.get("cls"),
+            ) if paths else RapidOCR()
+        except TypeError:
+            _engine = RapidOCR()
         # 预热,消除首次推理延迟
         import numpy as np
         warm = np.zeros((60, 120, 3), dtype=np.uint8)

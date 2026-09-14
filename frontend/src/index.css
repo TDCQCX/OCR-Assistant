@@ -160,43 +160,38 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   }
 }
 
-/* ============================ 自绘悬浮提示(修复系统 title 黑底看不见文字) ============================ */
+/* ============================ 自绘悬浮提示(白底黑字,夹在窗口内部) ============================ */
 .tip-wrap { position: relative; display: inline-flex; align-items: center; }
 .tip {
-  position: absolute;
+  position: fixed;
   z-index: 9998;
-  padding: 4px 8px;
-  border-radius: calc(var(--radius) * 0.55);
+  padding: 3px 7px;
+  border-radius: calc(var(--radius) * 0.5);
   font-size: 11.5px;
   line-height: 1.35;
   white-space: nowrap;
   pointer-events: none;
-  opacity: 0;
-  transform: translateY(2px);
-  transition: opacity .12s ease, transform .12s ease;
-  background: var(--c-fg);
-  color: var(--c-card);
-  box-shadow: var(--c-shadow);
+  background: var(--c-card);
+  color: var(--c-fg);
+  border: 1px solid var(--c-line);
+  box-shadow: 0 2px 8px rgba(15, 20, 30, .18);
+  transition: opacity .12s ease;
 }
-.tip-wrap:hover > .tip { opacity: 1; transform: translateY(0); }
-.tip-top { bottom: calc(100% + 6px); left: 50%; margin-left: -0px; transform: translate(-50%, 2px); }
-.tip-wrap:hover > .tip-top { transform: translate(-50%, 0); }
-.tip-bottom { top: calc(100% + 6px); left: 50%; transform: translate(-50%, -2px); }
-.tip-wrap:hover > .tip-bottom { transform: translate(-50%, 0); }
-.tip-right { left: calc(100% + 6px); top: 50%; transform: translate(-2px, -50%); }
-.tip-wrap:hover > .tip-right { transform: translate(0, -50%); }
+.tip-wrap:hover > .tip { opacity: 1 !important; }
 
 /* ============================ 模式切换:选中项展开文字 ============================ */
 .iconseg {
   @apply inline-flex items-center gap-0.5 p-0.5 rounded-ctl border border-line shrink-0;
   background: var(--c-sub);
+  transition: background .18s ease, border-color .18s ease;
 }
 .iconseg-item {
-  @apply inline-flex items-center gap-1.5 rounded-ctl font-medium transition-all whitespace-nowrap;
+  @apply inline-flex items-center gap-1.5 rounded-ctl font-medium whitespace-nowrap;
   height: 100%;
   padding: 0 7px;
   color: var(--c-muted);
   font-size: 12px;
+  transition: background .18s ease, color .18s ease, padding .22s ease;
 }
 .iconseg-item:hover { background: var(--c-hover); color: var(--c-fg); }
 .iconseg-item[data-active="1"] {
@@ -210,37 +205,41 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   max-width: 0;
   overflow: hidden;
   opacity: 0;
-  transition: max-width .22s ease, opacity .18s ease;
+  transition: max-width .24s cubic-bezier(.22,.61,.36,1), opacity .18s ease;
 }
 .iconseg-item[data-active="1"] .iconseg-label { max-width: 90px; opacity: 1; }
 
 /* ============================ 云端 / 本地 引擎开关 ============================ */
 .engine-switch { @apply inline-flex items-center gap-1.5 shrink-0; }
 .engine-track {
-  @apply relative inline-flex items-center rounded-full border border-line transition-colors;
-  width: 74px;
-  height: 22px;
+  @apply relative inline-flex items-center rounded-full border transition-all;
+  width: 66px;
+  height: 21px;
   background: var(--c-sub);
-  padding: 0 6px;
+  border-color: var(--c-line);
+  padding: 0 4px;
+  transition: background .22s ease, border-color .22s ease;
 }
 .engine-track[data-cloud="1"] { background: var(--c-accent-soft); border-color: var(--c-accent); }
 .engine-knob {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   border-radius: 999px;
   background: var(--c-muted);
-  transition: transform .18s ease, background .18s ease;
+  transition: transform .26s cubic-bezier(.22,.61,.36,1), background .22s ease;
 }
-.engine-track[data-cloud="1"] .engine-knob { transform: translateX(52px); background: var(--c-accent); }
+.engine-track[data-cloud="1"] .engine-knob { transform: translateX(45px); background: var(--c-accent); }
 .engine-text {
-  @apply w-full text-center text-[11px] font-medium select-none;
+  @apply w-full text-center select-none;
+  font-size: 10.5px;
   color: var(--c-muted);
+  transition: color .22s ease;
 }
 .engine-track[data-cloud="1"] .engine-text { color: var(--c-accent); }
-.engine-label { @apply text-[11.5px] text-muted; }
+.engine-label { @apply text-[11px] text-muted; }
 
 /* ============================ 语言方向 ============================ */
 .langpair { @apply inline-flex items-center gap-1 shrink-0; }
@@ -303,16 +302,18 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 .rs-se { bottom: 0; right: 0; width: 10px; height: 10px; cursor: nwse-resize; }
 
 /* ============================ 翻译模式 ============================ */
-.translate-pairs { @apply space-y-1.5; }
-.pair-row {
-  @apply grid gap-2 items-start;
-  grid-template-columns: 1fr;
+.translate-pairs { @apply space-y-3; }
+.pair-block { @apply pb-2.5; }
+.pair-block + .pair-block { border-top: 1px solid var(--c-line); padding-top: 10px; }
+.pair-src {
+  @apply leading-relaxed whitespace-pre-wrap;
+  color: var(--c-muted);
+  font-size: 12.5px;
 }
-.pair-line {
-  @apply px-2.5 py-1.5 rounded-ctl border border-line leading-relaxed;
+.pair-dst {
+  @apply leading-relaxed whitespace-pre-wrap mt-1;
+  font-size: 14px;
 }
-.pair-src { background: var(--c-sub); color: var(--c-muted); font-size: 12px; }
-.pair-dst { background: color-mix(in srgb, var(--c-accent) 6%, var(--c-card)); font-size: 13.5px; }
 .mode-enter { animation: slidein .2s ease-out; }
 @keyframes slidein {
   from { opacity: 0; transform: translateY(6px) scale(.995); }

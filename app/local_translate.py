@@ -210,6 +210,18 @@ def translate_lines(text: str, source_lang: str, target_lang: str, engine: str =
     engine = (engine or "auto").lower()
     errors = []
 
+    # 1) 端侧小模型(CTranslate2 + Argos 模型,按需下载)
+    if engine in ("auto", "argos", "onnx", "ct2"):
+        try:
+            from app import local_mt
+            if src and dst and local_mt.available(source_lang, target_lang):
+                dst_segments = local_mt.translate_segments(segments, source_lang, target_lang)
+                return {"pairs": _join_pairs(segments, dst_segments),
+                        "engine": "端侧翻译模型", "src_code": src, "dst_code": dst}
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc))
+
+    # 2) 已安装的 argostranslate(源码环境)
     if engine in ("auto", "argos") and src and argos_has_pair(src, dst):
         with _install_lock:
             dst_lines = _translate_argos(segments, src, dst)
@@ -217,11 +229,11 @@ def translate_lines(text: str, source_lang: str, target_lang: str, engine: str =
                 "src_code": src, "dst_code": dst}
 
     if engine == "argos" and not argos_installed():
-        raise LocalTranslateError("未安装端侧翻译模型:请执行 pip install argostranslate,"
-                                 "或在设置中改用 Ollama / 云端翻译")
+        errors.append("未安装端侧翻译模型(可在设置 → 翻译设置中一键下载)")
     if engine == "argos" and src and not argos_has_pair(src, dst):
-        raise LocalTranslateError(f"端侧模型缺少语言包 {src}->{dst}:请在设置 → 翻译设置中下载")
+        errors.append(f"端侧模型缺少语言包 {src}->{dst}:请在设置 → 翻译设置中下载")
 
+    # 3) 本机 Ollama
     if engine == "ollama" or (engine == "auto" and ollama_url):
         try:
             dst_lines = _translate_ollama(segments, source_lang, target_lang, ollama_url,
@@ -232,12 +244,8 @@ def translate_lines(text: str, source_lang: str, target_lang: str, engine: str =
             errors.append(str(exc))
 
     if engine == "auto":
-        if not argos_installed():
-            errors.append("未安装端侧翻译模型(可 pip install argostranslate)")
-        elif not src:
-            errors.append("自动检测来源语言时不支持端侧模型,请手动选择来源语言")
-        else:
-            errors.append(f"端侧模型缺少语言包 {src}->{dst}")
+        if not errors:
+            errors.append(f"端侧模型尚未下载({src}->{dst}),可在设置 → 翻译设置中下载")
     raise LocalTranslateError(";".join(errors) or "端侧翻译不可用")
 
 

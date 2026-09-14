@@ -57,9 +57,9 @@ export default function Translate() {
         <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag">O</span>
         <IconSeg size="sm" value="translate" options={MODES} onChange={(m) => app.setMode(m)} />
         <span className="flex-1" />
-        <EngineSwitch cloud={ocrCloud} onChange={setOcr} label="识别" tips={['云端识别', '端侧识别']} />
+        <EngineSwitch cloud={ocrCloud} onChange={setOcr} label="识别" tips={['云端', '本地']} />
         <EngineSwitch cloud={cloud} onChange={(v) => setTr({ mode: v ? 'cloud' : 'local' })}
-                      label="翻译" tips={['云端翻译', '端侧翻译']} />
+                      label="翻译" tips={['云端', '本地']} />
         <IconBtn icon="pin" tip={topmost ? '取消置顶' : '窗口置顶'} active={topmost}
                  onClick={async () => { const n = !topmost; setTopmost(n); await call('set_topmost', n) }} />
         <IconBtn icon="settings" tip="设置" onClick={() => call('open_settings')} />
@@ -124,9 +124,9 @@ export default function Translate() {
             ) : pairs.length ? (
               <div className="translate-pairs">
                 {pairs.map((p, i) => (
-                  <div className="pair-row" key={i}>
-                    {display !== 'translated' && <div className="pair-line pair-src">{p.src || '—'}</div>}
-                    {display !== 'source' && <div className="pair-line pair-dst">{p.dst || '—'}</div>}
+                  <div className="pair-block" key={i}>
+                    {display !== 'translated' && <div className="pair-src">{p.src || '—'}</div>}
+                    {display !== 'source' && <div className="pair-dst">{p.dst || '—'}</div>}
                   </div>
                 ))}
               </div>

@@ -297,6 +297,51 @@ class Api:
         self.app.push({"type": "pack", "ok": ok, "message": msg})
         self.app.push({"type": "status", "text": msg, "tone": "ok" if ok else "danger"})
 
+    # ================= 端侧模型(按需下载) =================
+    def local_models_status(self) -> dict:
+        from app import local_models
+        cfg_tr = self.app.cfg.get("translate") or {}
+        st = local_models.summary()
+        st["mt"] = local_models.mt_status(cfg_tr.get("source_lang", "自动检测"),
+                                          cfg_tr.get("target_lang", "中文"))
+        st["ocr_local"] = self.app.cfg.get("ocr", {}).get("mode", "cloud") == "local"
+        st["mt_local"] = (cfg_tr.get("mode") or "cloud") == "local"
+        return st
+
+    def download_local_model(self, kind: str) -> bool:
+        """kind: ocr / runtime / mt"""
+        threading.Thread(target=self._download_model, args=(str(kind),), daemon=True).start()
+        return True
+
+    def _download_model(self, kind: str):
+        from app import local_models
+        cfg_tr = self.app.cfg.get("translate") or {}
+
+        def progress(pct, text):
+            self.app.push({"type": "download", "kind": kind, "pct": int(pct), "text": text})
+
+        try:
+            self.app.push({"type": "download", "kind": kind, "pct": 0, "text": "准备下载…"})
+            if kind == "ocr":
+                msg = local_models.download_ocr(progress)
+            elif kind == "runtime":
+                msg = local_models.download_runtime(progress)
+            elif kind == "mt":
+                msg = local_models.download_mt(cfg_tr.get("source_lang", "英语"),
+                                               cfg_tr.get("target_lang", "中文"), progress)
+            else:
+                msg = "未知的模型类型"
+            self.app.push({"type": "download", "kind": kind, "pct": 100, "done": True, "message": msg})
+            self.app.push({"type": "status", "text": msg, "tone": "ok"})
+        except Exception as exc:  # noqa: BLE001
+            self.app.push({"type": "download", "kind": kind, "pct": 0, "done": True,
+                           "error": str(exc)})
+            self.app.push({"type": "status", "text": str(exc), "tone": "danger"})
+
+    def remove_local_model(self, kind: str) -> str:
+        from app import local_models
+        return local_models.remove(str(kind))
+
     # ================= 提问记忆(自输入自动保存) =================
     def remember_question(self, text: str) -> list:
         text = (text or "").strip()

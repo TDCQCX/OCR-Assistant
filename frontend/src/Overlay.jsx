@@ -3,7 +3,7 @@ import { call } from './bridge'
 import { useApp } from './main'
 import {
   Btn, Collapse, EngineSwitch, Icon, IconBtn, IconSeg, Pill, QBox, ResizeHandles, Tip,
-  useToast, useWindowDrag,
+  useSmallWindow, useToast, useWindowDrag,
 } from './ui'
 
 const MODES = [
@@ -26,8 +26,14 @@ export default function Overlay() {
   const [borderHidden, setBorderHidden] = useState(false)
   const [size, setSize] = useState({ w: cfg.window?.width || 640, h: cfg.window?.height || 680 })
   const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)
+  const small = useSmallWindow()
 
   useEffect(() => { call('list_providers').then((p) => { setProviders(p.list || []); setActive(p.active) }) }, [])
+
+  // 顶部只显示当前模型与状态(点击进入设置切换)
+  const curProv = providers.find((p) => p.id === active) || {}
+  const modelName = curProv.model || curProv.name || '未选择模型'
+  const modelReady = !!curProv.ready
 
   // 把洞口(OCR 区域)几何上报后端,用于把该区域从窗口"输入/绘制区域"中挖掉 → 鼠标可穿透
   const reportRef = useRef(() => {})
@@ -116,14 +122,6 @@ export default function Overlay() {
     await call('resize_main', w, h + chromeRef.current)
   }
 
-  const switchProvider = async (id) => {
-    setActive(id)
-    await call('set_active_provider', id)
-    const s = await call('get_state')
-    app.setCfg(s.config)
-    app.setStatus({ text: s.key_ready ? '就绪 · Key 已配置' : '就绪 · Key 未配置', tone: s.key_ready ? 'idle' : 'warn' })
-  }
-
   const toggleTop = async () => {
     const next = !topmost
     setTopmost(next)
@@ -153,13 +151,14 @@ export default function Overlay() {
         <IconSeg size="sm" value="overlay" options={MODES} onChange={(m) => app.setMode(m)} />
         <span className="flex-1" />
         <EngineSwitch cloud={(cfg.ocr?.mode || 'cloud') === 'cloud'} onChange={toggleOcr}
-                      label="识别" tips={['云端识别', '端侧识别']} />
-        <select className="ctl !w-[104px] !h-7 !text-[12px] no-drag" value={active}
-                onChange={(e) => switchProvider(e.target.value)}>
-          {providers.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}{p.ready ? '' : '(未配置)'}</option>
-          ))}
-        </select>
+                      tips={['云端', '本地']} />
+        {/* 只显示当前模型与状态,点击进入设置切换 */}
+        <Tip text="点击打开设置,切换模型/平台">
+          <button type="button" className="model-chip no-drag" onClick={() => call('open_settings')}>
+            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: modelReady ? 'var(--c-ok)' : 'var(--c-warn)' }} />
+            <span className="truncate">{modelName}</span>
+          </button>
+        </Tip>
         <IconBtn icon="pin" tip={topmost ? '取消置顶' : '窗口置顶'} active={topmost} onClick={toggleTop} />
         <IconBtn icon="settings" tip="设置" onClick={() => call('open_settings')} />
         <IconBtn icon="power" tip="退出(Ctrl+Q)" danger onClick={() => app.quit()} />
@@ -178,21 +177,23 @@ export default function Overlay() {
       </div>
 
       {/* ================= 底部:操作 + 结果 ================= */}
-      <footer className="panel shrink-0 border-t px-2.5 py-2 space-y-2">
+      <footer className={`panel shrink-0 border-t px-2.5 space-y-2 ${small ? 'py-1.5' : 'py-2'}`}>
         <div className="flex items-start gap-2">
-          <QBox value={question} onChange={setQuestion} rows={2} className="flex-1 no-drag"
+          <QBox value={question} onChange={setQuestion} rows={small ? 1 : 2} className="flex-1 no-drag"
                 presets={cfg.behavior?.question_presets} history={cfg.behavior?.question_history} />
           <div className="flex flex-col gap-1.5">
             <Btn primary icon="scan" disabled={busy} onClick={run}>{busy ? '处理中' : '识别'}</Btn>
-            <Tip text="翻译模式(无洞口,结果区更大)">
-              <Btn icon="translate" onClick={() => app.setMode('translate')}>翻译</Btn>
-            </Tip>
+            {!small && (
+              <Tip text="翻译模式(无洞口,结果区更大)">
+                <Btn icon="translate" onClick={() => app.setMode('translate')}>翻译</Btn>
+              </Tip>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap drag-handle" {...dragFooter}>
-          <Pill tone={modeTone}>{status.text}</Pill>
-          {result && !result.error && (
+          <Pill tone={modeTone}>{small ? status.text.slice(0, 6) : status.text}</Pill>
+          {!small && result && !result.error && (
             <>
               <span className="chip">{result.qtype_name}</span>
               <span className="chip">来源: {result.source}</span>
@@ -201,40 +202,46 @@ export default function Overlay() {
             </>
           )}
           <span className="flex-1" />
-          <IconBtn icon="snip" tip="重新框选区域(可设为悬浮窗区域)" onClick={() => app.startSnip()} />
-          <IconBtn icon="copy" tip="复制回答" onClick={copy} />
-          <IconBtn icon="trash" tip="清空结果" onClick={() => app.setResult(null)} />
-          <Icon name="grid" size={14} className="text-muted" />
-          <input type="number" className="ctl !w-14 text-right" value={size.w} title="洞口宽度"
-                 onFocus={() => { editingRef.current = true }}
-                 onChange={(e) => setSize({ ...size, w: +e.target.value })}
-                 onBlur={(e) => { editingRef.current = false; resize(+e.target.value, size.h) }} />
-          <span className="text-muted text-[12px]">×</span>
-          <input type="number" className="ctl !w-14 text-right" value={size.h} title="洞口高度"
-                 onFocus={() => { editingRef.current = true }}
-                 onChange={(e) => setSize({ ...size, h: +e.target.value })}
-                 onBlur={(e) => { editingRef.current = false; resize(size.w, +e.target.value) }} />
+          {!small && (
+            <>
+              <IconBtn icon="snip" tip="重新框选区域(可设为悬浮窗区域)" onClick={() => app.startSnip()} />
+              <IconBtn icon="copy" tip="复制回答" onClick={copy} />
+              <IconBtn icon="trash" tip="清空结果" onClick={() => app.setResult(null)} />
+              <Icon name="grid" size={14} className="text-muted" />
+              <input type="number" className="ctl !w-14 text-right" value={size.w} title="洞口宽度"
+                     onFocus={() => { editingRef.current = true }}
+                     onChange={(e) => setSize({ ...size, w: +e.target.value })}
+                     onBlur={(e) => { editingRef.current = false; resize(+e.target.value, size.h) }} />
+              <span className="text-muted text-[12px]">×</span>
+              <input type="number" className="ctl !w-14 text-right" value={size.h} title="洞口高度"
+                     onFocus={() => { editingRef.current = true }}
+                     onChange={(e) => setSize({ ...size, h: +e.target.value })}
+                     onBlur={(e) => { editingRef.current = false; resize(size.w, +e.target.value) }} />
+            </>
+          )}
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5 max-h-[28vh] overflow-auto">
-          <Collapse title="识别结果" badge={<span className="hint">{(result?.ocr_text || '').length} 字</span>}>
-            <pre className="whitespace-pre-wrap text-[12px] leading-relaxed inset p-2 max-h-36 overflow-auto">
-              {result?.ocr_text || '—'}
-            </pre>
-          </Collapse>
-          <Collapse title="回答">
-            {result?.error ? (
-              <div className="inset p-2 flex items-start gap-2 text-[12.5px]" style={{ color: 'var(--c-danger)' }}>
-                <Icon name="alert" size={14} className="mt-0.5" />
-                <span>{result.error}</span>
-              </div>
-            ) : (
-              <pre className="whitespace-pre-wrap text-[13px] leading-relaxed inset p-2 max-h-36 overflow-auto">
-                {result?.answer || '—'}
+        {!small && (
+          <div className="grid grid-cols-2 gap-2.5 max-h-[28vh] overflow-auto">
+            <Collapse title="识别结果" badge={<span className="hint">{(result?.ocr_text || '').length} 字</span>}>
+              <pre className="whitespace-pre-wrap text-[12px] leading-relaxed inset p-2 max-h-36 overflow-auto">
+                {result?.ocr_text || '—'}
               </pre>
-            )}
-          </Collapse>
-        </div>
+            </Collapse>
+            <Collapse title="回答">
+              {result?.error ? (
+                <div className="inset p-2 flex items-start gap-2 text-[12.5px]" style={{ color: 'var(--c-danger)' }}>
+                  <Icon name="alert" size={14} className="mt-0.5" />
+                  <span>{result.error}</span>
+                </div>
+              ) : (
+                <pre className="whitespace-pre-wrap text-[13px] leading-relaxed inset p-2 max-h-36 overflow-auto">
+                  {result?.answer || '—'}
+                </pre>
+              )}
+            </Collapse>
+          </div>
+        )}
       </footer>
     </div>
   )

@@ -134,10 +134,12 @@ class App:
             hidden=mode != "mini",
         )
         tx, ty = cfg["window"].get("translate_x"), cfg["window"].get("translate_y")
+        # 翻译窗口不透明(避免遮挡/看不清内容),默认不置顶
         self.translate = webview.create_window(
             "OCR 助手 - 翻译", _url("translate"), js_api=api, width=tw, height=th,
-            frameless=True, easy_drag=False, on_top=on_top, transparent=True,
-            hidden=mode != "translate", text_select=True,
+            frameless=True, easy_drag=False,
+            on_top=bool(cfg["window"].get("translate_on_top", False)),
+            transparent=False, hidden=mode != "translate", text_select=True,
             **({"x": int(tx), "y": int(ty)} if tx is not None and ty is not None else {}),
         )
         self.settings = webview.create_window(
@@ -387,6 +389,7 @@ class App:
         win = self._win(which)
         if not d or win is None:
             return False
+        switch_to = ""
         try:
             pos = d.get("last") or (int(win.x), int(win.y), int(win.width), int(win.height))
             win_cfg = self.cfg.setdefault("window", {})
@@ -396,10 +399,23 @@ class App:
             else:
                 win_cfg["x"], win_cfg["y"] = pos[0], pos[1]
                 win_cfg["width"], win_cfg["height"] = pos[2], pos[3]
+                win_cfg["holeWidth"] = max(120, pos[2] - 4)
+                win_cfg["holeHeight"] = max(80, pos[3] - int(win_cfg.get("chromeHeight") or 300))
+            # 缩到最小 → 迷你条;迷你条拉伸过大 → 悬浮窗
+            min_w, min_h = (420, 300) if which == "overlay" else (0, 0)
+            max_w = 560
+            if which == "overlay" and (pos[2] < min_w or pos[3] < min_h):
+                switch_to = "mini"
+            elif which == "mini" and pos[2] > max_w:
+                switch_to = "overlay"
             cfgmod.save_config(self.cfg)
         except Exception:
             pass
         self.push({"type": "config", "config": self.cfg})
+        if switch_to:
+            self.push({"type": "status", "text": "已切换到" + ("迷你条模式" if switch_to == "mini" else "悬浮窗模式"),
+                       "tone": "ok"})
+            self.set_mode(switch_to)
         return True
 
     def _apply_region(self, hx: int, hy: int, hw: int, hh: int):

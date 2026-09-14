@@ -4,6 +4,7 @@ __pycache__/
 config.json
 request_log.json
 history.json
+models/
 cache/
 questions/
 node_modules/

@@ -113,9 +113,9 @@ export default function Snip() {
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <EngineSwitch cloud={(cfg?.ocr?.mode || 'cloud') === 'cloud'} onChange={toggleOcr}
-                            label="识别" tips={['云端识别', '端侧识别']} />
+                            label="识别" tips={['云端', '本地']} />
               <EngineSwitch cloud={(tr.mode || 'cloud') === 'cloud'} onChange={(v) => setTr({ mode: v ? 'cloud' : 'local' })}
-                            label="翻译" tips={['云端翻译', '端侧翻译']} />
+                            label="翻译" tips={['云端', '本地']} />
               <span className="flex-1" />
               <LangPair languages={langs} source={tr.source_lang || '自动检测'} target={tr.target_lang || '中文'}
                         onChange={(s, t) => setTr({ source_lang: s, target_lang: t })} />

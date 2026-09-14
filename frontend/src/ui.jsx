@@ -56,13 +56,52 @@ export function Icon({ name, size = 16, className = '', strokeWidth = 1.6 }) {
   )
 }
 
-/* ============================ 悬浮提示(自绘,替代系统 title 的黑底提示) ============================ */
+/* ============================ 悬浮提示(自绘白底黑字,并夹在窗口内部) ============================ */
+/** 窗口过小时不再使用悬浮提示(提示框物理上放不下),改为就地展开文字 */
+export function useSmallWindow() {
+  const [small, setSmall] = useState(false)
+  useEffect(() => {
+    const on = () => setSmall(window.innerHeight < 170 || window.innerWidth < 400)
+    on()
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  return small
+}
+
 export function Tip({ text, side = 'top', children }) {
-  if (!text) return children
+  const wrap = useRef(null)
+  const tip = useRef(null)
+  const [pos, setPos] = useState(null)
+  const small = useSmallWindow()
+  if (!text || small) return children
+
+  const place = () => {
+    const w = wrap.current
+    const t = tip.current
+    if (!w || !t) return
+    const wr = w.getBoundingClientRect()
+    const tw = t.offsetWidth
+    const th = t.offsetHeight
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const pad = 6
+    let x = wr.left + wr.width / 2 - tw / 2          // 相对窗口:尽量居中
+    let y = wr.top - th - 6
+    if (y < pad) y = wr.bottom + 6                    // 上方放不下就放下方
+    y = Math.max(pad, Math.min(y, vh - th - pad))     // 夹在窗口内部
+    x = Math.max(pad, Math.min(x, vw - tw - pad))
+    setPos({ left: x, top: y })
+  }
+
   return (
-    <span className="tip-wrap">
+    <span ref={wrap} className="tip-wrap"
+          onMouseEnter={place} onFocus={place} onMouseLeave={() => setPos(null)}>
       {children}
-      <span className={`tip tip-${side}`} role="tooltip">{text}</span>
+      <span ref={tip} className="tip" role="tooltip"
+            style={pos ? { left: pos.left, top: pos.top, opacity: 1 } : { visibility: 'hidden' }}>
+        {text}
+      </span>
     </span>
   )
 }
@@ -110,22 +149,23 @@ export function IconSeg({ value, options, onChange, size = 'md' }) {
   )
 }
 
-/** 云端 / 本地 引擎开关(开=云端,关=本地) */
-export function EngineSwitch({ cloud, onChange, label = '', tips = ['云端', '本地'] }) {
+/** 云端 / 本地 引擎开关(开=云端,关=本地;文字精简、过渡平滑) */
+export function EngineSwitch({ cloud, onChange, label = '', tips = ['云端', '本地'], compact = false }) {
   return (
-    <div className="engine-switch" title="">
+    <span className="engine-switch" title={label ? `${label}:${cloud ? tips[0] : tips[1]}` : ''}>
       <button
         type="button"
         className="engine-track"
         data-cloud={cloud ? '1' : '0'}
+        data-compact={compact ? '1' : '0'}
         onClick={() => onChange(!cloud)}
         aria-label={`${label} ${cloud ? tips[0] : tips[1]}`}
       >
         <span className="engine-knob" />
         <span className="engine-text">{cloud ? tips[0] : tips[1]}</span>
       </button>
-      {label && <span className="engine-label">{label}</span>}
-    </div>
+      {label && !compact && <span className="engine-label">{label}</span>}
+    </span>
   )
 }
 

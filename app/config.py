@@ -157,6 +157,7 @@ DEFAULT_CONFIG = {
         "translateHeight": 620,
         "translate_x": None,
         "translate_y": None,
+        "translate_on_top": False,     # 翻译窗口默认不置顶(避免遮挡待翻译内容)
         "holeWidth": None,             # 洞口(OCR 区域)尺寸
         "holeHeight": None,
         "chromeHeight": 300,           # 窗口非洞口部分高度(标题栏+底部面板,由前端上报)
