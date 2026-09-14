@@ -15,6 +15,7 @@ export default function Overlay() {
   const toast = useToast()
   const holeRef = useRef(null)
   const dragHeader = useWindowDrag('overlay')
+  const dragFooter = useWindowDrag('overlay')
   const [question, setQuestion] = useState(cfg.behavior?.default_question || '请给出该题目的答案')
   const [providers, setProviders] = useState([])
   const [active, setActive] = useState(cfg.active_provider)
@@ -146,7 +147,7 @@ export default function Overlay() {
                  onChange={(e) => setSize({ ...size, h: +e.target.value })} onBlur={() => resize(size.w, size.h)} />
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap drag-handle" {...dragFooter}>
           <Pill tone={modeTone}>{status.text}</Pill>
           {result && !result.error && (
             <>
