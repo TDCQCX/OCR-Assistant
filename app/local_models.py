@@ -298,7 +298,7 @@ OCR_TIERS = {
 
 MT_TIERS = {
     "light": {
-        "name": "轻量", "recommend": False, "size_mb": 79,
+        "name": "轻量", "recommend": True, "usable": True, "size_mb": 79,
         "kind": "pair", "source": "argos-net.com —— Argos opus-mt int8",
         "speed": "最快(单段约 0.03-0.1s)",
         "quality": "大意可读,长句与专业词较弱",
@@ -306,7 +306,7 @@ MT_TIERS = {
         "covered": "仅英↔中/日/韩/法/德/俄/西/葡/意/阿/泰/越",
     },
     "balanced": {
-        "name": "均衡", "recommend": True, "size_mb": 600,
+        "name": "均衡", "recommend": False, "usable": False, "size_mb": 600,
         "kind": "multi", "repo": "JustFrederik/nllb-200-distilled-600M-ct2-int8",
         "source": "hf-mirror / HuggingFace —— NLLB-200 distilled 600M(int8)",
         "speed": "中等(单段约 0.5-2s)",
@@ -315,7 +315,7 @@ MT_TIERS = {
         "covered": "一个模型覆盖 200 种语言,换语言无需再下载",
     },
     "full": {
-        "name": "全量", "recommend": False, "size_mb": 1322,
+        "name": "全量", "recommend": False, "usable": False, "size_mb": 1322,
         "kind": "multi", "repo": "JustFrederik/nllb-200-distilled-1.3B-ct2-int8",
         "source": "hf-mirror / HuggingFace —— NLLB-200 distilled 1.3B(int8)",
         "speed": "最慢(单段约 2-10s,取决于 CPU)",
@@ -327,11 +327,11 @@ MT_TIERS = {
 
 
 def tier_list(kind: str) -> list:
-    """档位清单(供界面展示)。"""
-    table = OCR_TIERS if kind == "ocr" else MT_TIERS
+    """档位清单(供界面展示)。只列出当前可用(已实测)的档位。"""
+    table = OCR_TIERS if kind == "ocr" else {k: v for k, v in MT_TIERS.items() if v.get("usable")}
     out = []
     for key, info in table.items():
-        st = ocr_tier_status(key) if kind == "ocr" else None
+        st = ocr_tier_status(key) if kind == "ocr" else mt_tier_status(key)
         item = {"key": key, **{k: v for k, v in info.items() if k not in ("files", "repo")}}
         if st:
             item.update({"ready": st["ready"], "size_on_disk": st["size_mb"]})
@@ -351,6 +351,32 @@ def ocr_tier_status(tier: str) -> dict:
             missing = []
     return {"tier": tier, "ready": not missing, "dir": str(d), "missing": missing,
             "size_mb": _dir_size(d)}
+
+
+def get_ocr_tier() -> str:
+    return DEFAULT_OCR_TIER
+
+
+def apply_settings(local_cfg: dict) -> None:
+    """从配置恢复档位与下载源。"""
+    global DEFAULT_OCR_TIER, DEFAULT_MT_TIER
+    cfg = local_cfg or {}
+    if cfg.get('ocr_tier') in OCR_TIERS:
+        DEFAULT_OCR_TIER = cfg['ocr_tier']
+    if cfg.get('mt_tier') in MT_TIERS:
+        DEFAULT_MT_TIER = cfg['mt_tier']
+    if cfg.get('source'):
+        set_source(str(cfg['source']))
+
+
+def remove_mt_tier(tier: str) -> str:
+    if tier == 'light':
+        return remove('mt')
+    d = MT_TIER_DIR / tier
+    if d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+        return f'已删除翻译 {tier} 档模型'
+    return '该档位没有已下载的模型'
 
 
 def current_ocr_tier() -> str:
@@ -412,14 +438,29 @@ def download_ocr(tier: str = "", progress=None) -> str:
             raise ModelMissing("ocr", f"模型包内容不完整(找到 {count} 个文件)")
     else:
         # 均衡/全量:从 HuggingFace(或镜像)取 PP-OCR server 模型
+        # 注意仓库目录结构:det/rec 在 PP-OCRv4/,cls 在 PP-OCRv1/
         repo = "SWHL/RapidOCR"
-        need = [(f"PP-OCRv4/{n}", d / n) for n in info["files"].values()]
-        todo = [(src, dst) for src, dst in need if not dst.exists()]
-        todo.sort(key=lambda x: x[1].name == info["files"]["cls"], reverse=True)
-        for i, (src, dst) in enumerate(todo):
-            base = int(i / max(1, len(todo)) * 100)
-            span = int(100 / max(1, len(todo))) - 2
-            _fetch(f"/{repo}/resolve/main/{src}", dst, progress, base, span)
+        det = info["files"]["det"]
+        rec = info["files"]["rec"]
+        cls = info["files"]["cls"]
+        remote = {
+            det: f"PP-OCRv4/{det}",
+            rec: f"PP-OCRv4/{rec}",
+            cls: f"PP-OCRv1/{cls}",
+        }
+        for name in (det, rec, cls):
+            target = d / name
+            if target.exists():
+                continue
+            # cls 很小且各档相同:优先复用已下载/内置的副本,避免多余下载
+            if name == cls:
+                for src_dir in (OCR_DIR / "light", OCR_DIR):
+                    if (src_dir / name).exists():
+                        shutil.copyfile(src_dir / name, target)
+                        break
+            if target.exists():
+                continue
+            _fetch(f"/{repo}/resolve/main/{remote[name]}", target, progress, 0, 100)
     progress(100, f"{info['name']}档模型已就绪")
     return f"OCR {info['name']}档下载完成({_dir_size(d)}MB)"
 
@@ -435,7 +476,7 @@ def remove_ocr_tier(tier: str) -> str:
 HF_HOSTS = {"hf": "https://huggingface.co", "mirror": "https://hf-mirror.com"}
 DEFAULT_SOURCE = "auto"          # auto=先官方后镜像; hf=只用官方; mirror=只用 hf-mirror
 DEFAULT_OCR_TIER = "balanced"    # 默认档位:均衡
-DEFAULT_MT_TIER = "balanced"
+DEFAULT_MT_TIER = "light"
 
 
 def set_source(source: str) -> str:
@@ -483,6 +524,91 @@ def _fetch(url: str, dest: Path, progress=None, base_pct: int = 0, span: int = 1
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
     raise ModelMissing("mt", f"下载 {dest.name} 失败:{last_err}")
+
+
+# ================= 翻译档位的落盘与状态 =================
+MT_TIER_DIR = MT_DIR / "tier"
+
+
+def mt_tier_info(tier: str) -> dict:
+    return MT_TIERS.get(tier) or MT_TIERS["light"]
+
+
+def _light_pair_dir() -> Path:
+    for d in sorted(MT_DIR.glob("*-*")):
+        if d.is_dir() and d.name != "tier" and (d / "model.bin").exists():
+            return d
+    return MT_DIR / "en-zh"
+
+
+def mt_current_model() -> tuple:
+    """返回 (档位, 模型目录)。
+
+    规则:先用用户设定的档位;该档未下载时才回落到其它已下载的档。
+    """
+    if DEFAULT_MT_TIER == "light":
+        d = _light_pair_dir()
+        if (d / "model.bin").exists():
+            return "light", d
+    else:
+        d = MT_TIER_DIR / DEFAULT_MT_TIER
+        if (d / "model.bin").exists():
+            return DEFAULT_MT_TIER, d
+    for tier in ("balanced", "full"):
+        d = MT_TIER_DIR / tier
+        if (d / "model.bin").exists():
+            return tier, d
+    d = _light_pair_dir()
+    if (d / "model.bin").exists():
+        return "light", d
+    return DEFAULT_MT_TIER, (MT_TIER_DIR / DEFAULT_MT_TIER if DEFAULT_MT_TIER != "light"
+                             else MT_DIR / "en-zh")
+
+
+def mt_tier_status(tier: str) -> dict:
+    if tier == "light":
+        d = _light_pair_dir()
+        ready = (d / "model.bin").exists()
+        return {"tier": "light", "ready": ready, "dir": str(d),
+                "size_mb": _dir_size(d), "name": mt_tier_info("light")["name"]}
+    d = MT_TIER_DIR / tier
+    ready = (d / "model.bin").exists()
+    return {"tier": tier, "ready": ready, "dir": str(d),
+            "size_mb": _dir_size(d), "name": mt_tier_info(tier)["name"]}
+
+
+def get_mt_tier() -> str:
+    return DEFAULT_MT_TIER
+
+
+def set_mt_tier(tier: str) -> str:
+    global DEFAULT_MT_TIER
+    if tier in MT_TIERS:
+        DEFAULT_MT_TIER = tier
+    return DEFAULT_MT_TIER
+
+
+def download_mt_tier(tier: str, progress=None) -> str:
+    """下载多语言翻译档(均衡 = NLLB-600M,全量 = NLLB-1.3B,均为 int8 专用翻译模型)。"""
+    progress = progress or (lambda pct, text: None)
+    info = MT_TIERS.get(tier)
+    if not info or info.get("kind") != "multi":
+        raise ModelMissing("mt", "该档位不是多语言模型")
+    repo = info["repo"]
+    d = MT_TIER_DIR / tier
+    d.mkdir(parents=True, exist_ok=True)
+    files = [("model.bin", "model.bin"),
+             ("sentencepiece.bpe.model", "sentencepiece.bpe.model"),
+             ("shared_vocabulary.txt", "shared_vocabulary.txt")]
+    for i, (src, name) in enumerate(files):
+        target = d / name
+        if target.exists():
+            continue
+        base = int(i / len(files) * 100)
+        span = int(100 / len(files)) - 2
+        _fetch(f"/{repo}/resolve/main/{src}", target, progress, base, span)
+    progress(100, f"{info['name']}档翻译模型已就绪")
+    return f"翻译 {info['name']}档下载完成({_dir_size(d)}MB)"
 
 
 def remove(kind: str) -> str:

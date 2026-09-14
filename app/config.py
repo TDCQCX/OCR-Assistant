@@ -183,6 +183,11 @@ DEFAULT_CONFIG = {
         "auto_refresh": False,         # 自动刷新:定时重新捕获并翻译
         "auto_interval_ms": 2500,      # 自动刷新间隔(毫秒)
     },
+    "local": {                        # 端侧模型档位与下载源
+        "ocr_tier": "balanced",       # light=轻量 / balanced=均衡 / full=全量
+        "mt_tier": "light",           # 端侧翻译:轻量(opus-mt;离线可用,准确度有限)
+        "source": "auto",             # 模型下载源:auto / hf / hf-mirror
+    },
     "knowledge": [],                   # 本地知识库:[{keys:[...], answer, detail}]
     "hotkeys": {
         "capture": "ctrl+f1",          # 截图并识别
@@ -208,11 +213,11 @@ DEFAULT_CONFIG = {
         "add_to_knowledge": False,               # 是否将 AI 回答自动添加到本地知识库
     },
     "app": {
-        "version": "2.3.0",
+        "version": "2.4.0",
         "github": "https://github.com/TDCQCX/OCR-Assistant",  # 关于页跳转地址
         "qq_group": "1108236960",
         "license": "MIT",
-        "features": "悬浮窗/翻译/框选/迷你条 · 端侧模型按需下载 · 双语对照 · 多平台 · 全局主题",
+        "features": "悬浮窗/翻译/框选/迷你条 · OCR 三档端侧模型 · 双语对照 · 多平台 · 全局主题",
     },
 }
 

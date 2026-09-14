@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
 import { applyTheme, resolveTheme, PRESETS, COLOR_FIELDS } from './theme'
-import { Btn, Card, ColorInput, Field, Icon, IconBtn, Pill, Segmented, Switch, useToast } from './ui'
+import { Btn, Card, ColorInput, Field, Icon, IconBtn, ModelTiers, Segmented, Switch, useToast } from './ui'
 
 const NAV = [
   { key: 'model', label: '模型设置', icon: 'chip' },
@@ -435,38 +435,45 @@ function TranslatePage() {
       </Card>
 
       <Card title="端侧模型管理" icon="download"
-            desc="按需下载,不随应用分发;下载后可完全离线使用"
-            right={<Btn icon="refresh" onClick={() => call('local_models_status').then(setModels)}>刷新</Btn>}>
-        <div className="space-y-2">
-          {[
-            ['ocr', 'OCR 识别模型', 'RapidOCR PP-OCRv4(检测/识别/方向)', '约 16 MB', models?.ocr],
-            ['runtime', '推理运行时', 'CTranslate2 + sentencepiece', '约 62 MB', models?.runtime],
-            ['mt', '翻译模型', models?.mt?.pair ? `当前语言对 ${models.mt.pair}` : '当前语言对', '约 79 MB', models?.mt],
-          ].map(([kind, name, desc, size, st]) => (
-            <div key={kind} className="inset px-3 py-2 flex items-center gap-2.5">
-              <span className="card-icon"><Icon name={st?.ready ? 'check' : 'download'} size={14} /></span>
-              <div className="min-w-0 flex-1">
-                <div className="font-medium">{name}</div>
-                <div className="hint truncate">{desc}{st?.size_mb ? ` · 已占用 ${st.size_mb}MB` : ''}</div>
-              </div>
-              <Pill tone={st?.ready ? 'ok' : 'warn'}>{st?.ready ? '已就绪' : '未下载'}</Pill>
-              {st?.ready ? (
-                <Btn danger onClick={async () => {
-                  toast(await call('remove_local_model', kind)); call('local_models_status').then(setModels)
-                }}>删除</Btn>
-              ) : (
-                <Btn primary icon="download" onClick={() => {
-                  call('download_local_model', kind); toast('已开始下载(进度见右下角)')
-                }}>{size}</Btn>
-              )}
+            desc="按需下载,不随应用分发;识别可选三档,翻译为离线专用模型"
+            right={<><Segmented size="sm" value={models?.source || 'auto'}
+                                 options={[{ value: 'auto', label: '自动' }, { value: 'hf', label: '官方' },
+                                           { value: 'mirror', label: 'hf-mirror' }]}
+                                 onChange={(v) => call('set_local_tier', 'source', v)
+                                   .then(() => call('local_models_status').then(setModels))} />
+                     <Btn className="ml-2" icon="refresh"
+                          onClick={() => call('local_models_status').then(setModels)}>刷新</Btn></>}>
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center gap-2 mb-1.5">
+              <Icon name="scan" size={14} className="text-muted" />
+              <span className="font-medium text-[12.5px]">识别模型(OCR)</span>
+              <span className="hint">下载源:{models?.source === 'mirror' ? 'hf-mirror' : models?.source === 'hf' ? '官方' : '自动'}</span>
             </div>
-          ))}
-          <div className="flex items-center gap-2 flex-wrap">
-            <Pill tone={status?.ollama ? 'ok' : 'muted'}>{status?.ollama ? 'Ollama 可用' : 'Ollama 未检测到'}</Pill>
-            <span className="hint">
-              端侧模型目录:{models?.root || 'models/'}(可在文件管理器中删除)
-            </span>
+            <ModelTiers kind="ocr" tiers={models?.tiers?.ocr || []} current={models?.current?.ocr}
+                        onSelect={(t) => call('set_local_tier', 'ocr', t).then(() => call('local_models_status').then(setModels))}
+                        onDownload={(t) => { call('download_local_model', 'ocr', t); toast('已开始下载(进度见右下角)') }}
+                        onRemove={async (t) => { toast(await call('remove_local_model', 'ocr', t)); call('local_models_status').then(setModels) }} />
           </div>
+          <div>
+            <div className="flex items-center gap-2 mb-1.5">
+              <Icon name="translate" size={14} className="text-muted" />
+              <span className="font-medium text-[12.5px]">翻译模型(端侧)</span>
+            </div>
+            <ModelTiers kind="mt" tiers={models?.tiers?.mt || []} current={models?.current?.mt}
+                        onSelect={(t) => call('set_local_tier', 'mt', t).then(() => call('local_models_status').then(setModels))}
+                        onDownload={(t) => { call('download_local_model', 'mt', t); toast('已开始下载(进度见右下角)') }}
+                        onRemove={async (t) => { toast(await call('remove_local_model', 'mt', t)); call('local_models_status').then(setModels) }} />
+            <div className="inset px-3 py-2 mt-2 flex items-center gap-2 text-[12px]">
+              <span className="text-muted shrink-0">推理运行时</span>
+              {models?.runtime?.ready
+                ? <span className="chip" style={{ color: 'var(--c-ok)', borderColor: 'var(--c-ok)' }}>已就绪</span>
+                : <Btn className="!h-7 !text-[12px]" icon="download"
+                       onClick={() => { call('download_local_model', 'runtime'); toast('已开始下载运行时') }}>下载(约 62MB)</Btn>}
+              <span className="hint">端侧翻译准确度有限,追求质量请用云端</span>
+            </div>
+          </div>
+          <div className="hint">模型目录:{models?.root || 'models/'}(删除档位即释放对应空间)</div>
         </div>
       </Card>
 

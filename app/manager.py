@@ -64,6 +64,11 @@ class App:
 
     def _bootstrap(self):
         """启动后校正窗口可见性,并按模式摆好位置。"""
+        try:
+            from app import local_models
+            local_models.apply_settings(self.cfg.get("local") or {})
+        except Exception:
+            pass
         time.sleep(1.5)
         self._sync_visibility()
         time.sleep(3)

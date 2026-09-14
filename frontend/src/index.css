@@ -379,3 +379,20 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 
 /* 拖拽光标 */
 .drag-handle { cursor: move; }
+
+/* ============================ 档位卡片 ============================ */
+.tier-card {
+  @apply rounded-ctl border border-line px-3 py-2.5;
+  background: var(--c-sub);
+  transition: border-color .18s ease, background .18s ease;
+}
+.tier-card-active { border-color: var(--c-accent); background: var(--c-accent-soft); }
+.tier-radio {
+  @apply inline-block rounded-full border shrink-0;
+  width: 12px; height: 12px;
+  border-color: var(--c-muted);
+}
+.tier-radio[data-on="1"] {
+  border-color: var(--c-accent);
+  background: radial-gradient(circle, var(--c-accent) 0 3px, transparent 4px);
+}

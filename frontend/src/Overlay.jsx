@@ -136,7 +136,8 @@ export default function Overlay() {
   const toggleOcr = async (cloud) => {
     if (!cloud) {
       const st = await call('local_models_status')
-      if (!st?.ocr?.ready) {
+      const ocrReady = st?.tiers?.ocr?.find((t) => t.key === st?.current?.ocr)?.ready ?? st?.ocr?.ready
+      if (!ocrReady) {
         dl.ask('ocr', {
           title: '端侧识别需要下载 OCR 模型',
           detail: 'RapidOCR 检测/识别/方向模型(PP-OCRv4)',

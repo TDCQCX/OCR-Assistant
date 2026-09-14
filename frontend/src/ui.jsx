@@ -305,13 +305,61 @@ export function ResizeHandles({ which, onStart }) {
   )
 }
 
-/* ============================ 端侧模型下载(提示 + 进度) ============================ */
+/* ============================ 端侧模型:档位选择 + 下载进度 ============================ */
 const DownloadCtx = createContext({ ask: () => {}, progress: null })
 export const useDownloader = () => useContext(DownloadCtx)
+
+const KIND_TITLE = { ocr: '端侧识别模型', mt: '端侧翻译模型', runtime: '端侧推理运行时' }
+
+/** 档位卡片列表(下载弹窗与设置页共用) */
+export function ModelTiers({ kind, tiers, current, onSelect, onDownload, onRemove, busyTier }) {
+  if (!tiers || !tiers.length) return <div className="hint">暂无可下载的档位</div>
+  return (
+    <div className="space-y-2">
+      {tiers.map((t) => {
+        const active = current === t.key
+        return (
+          <div key={t.key} className={`tier-card ${active ? 'tier-card-active' : ''}`}>
+            <div className="flex items-center gap-2">
+              <span className="tier-radio" data-on={active ? '1' : '0'} />
+              <span className="font-semibold text-[13px]">{t.name}</span>
+              {t.recommend && <span className="chip">推荐</span>}
+              <span className="chip">{t.size_mb} MB</span>
+              <span className="flex-1" />
+              {t.ready
+                ? <span className="chip" style={{ color: 'var(--c-ok)', borderColor: 'var(--c-ok)' }}>已下载{t.size_on_disk ? ` · ${t.size_on_disk}MB` : ''}</span>
+                : <span className="chip" style={{ color: 'var(--c-warn)', borderColor: 'var(--c-warn)' }}>未下载</span>}
+            </div>
+            <div className="hint mt-1 leading-snug">
+              速度:{t.speed} · 准确度:{t.quality}
+            </div>
+            <div className="hint mt-0.5 leading-snug">代价:{t.cost}</div>
+            {t.covered && <div className="hint mt-0.5 leading-snug">覆盖:{t.covered}</div>}
+            <div className="flex items-center gap-2 mt-2">
+              <Btn className="!h-7 !text-[12px]" disabled={active} onClick={() => onSelect(t.key)}>
+                {active ? '当前使用' : '选为当前档位'}
+              </Btn>
+              {t.ready
+                ? <Btn className="!h-7 !text-[12px]" danger onClick={() => onRemove(t.key)}>删除</Btn>
+                : <Btn className="!h-7 !text-[12px]" primary icon="download" disabled={busyTier === t.key}
+                        onClick={() => onDownload(t.key)}>
+                    {busyTier === t.key ? '下载中…' : '下载'}
+                  </Btn>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 export function DownloadHost({ children }) {
   const [req, setReq] = useState(null)
   const [prog, setProg] = useState(null)
+  const [data, setData] = useState(null)
+  const [busyTier, setBusyTier] = useState('')
+
+  const load = () => call('local_models_status').then(setData)
 
   useEffect(() => {
     const on = (e) => {
@@ -319,6 +367,8 @@ export function DownloadHost({ children }) {
       if (ev.type !== 'download') return
       setProg(ev)
       if (ev.done) {
+        setBusyTier('')
+        load()
         if (!ev.error && req?.onDone) req.onDone()
         setTimeout(() => setProg(null), ev.error ? 6000 : 3000)
       }
@@ -327,44 +377,78 @@ export function DownloadHost({ children }) {
     return () => window.removeEventListener('ocr-event', on)
   }, [req])
 
-  const ask = (kind, opts = {}) => setReq({ kind, ...opts })
-  const start = () => {
-    const kind = req?.kind
-    setReq(null)
-    call('download_local_model', kind)
+  const ask = (kind, opts = {}) => {
+    setReq({ kind, ...opts })
+    setData(null)
+    load()
   }
+  const close = () => setReq(null)
+
+  const tiers = data?.tiers?.[req?.kind] || []
+  const current = data?.current?.[req?.kind] || ''
+  const source = data?.source || 'auto'
 
   return (
-    <DownloadCtx.Provider value={{ ask, progress: prog }}>
+    <DownloadCtx.Provider value={{ ask, progress: prog, data, reload: load }}>
       {children}
       {req && (
-        <div className="modal-mask" onClick={() => setReq(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-mask" onClick={close}>
+          <div className="modal-card !w-[520px] max-h-[86vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2.5 mb-2.5">
               <span className="card-icon"><Icon name="download" size={15} /></span>
               <div className="min-w-0">
-                <div className="font-semibold">{req.title || '需要下载端侧模型'}</div>
-                <div className="hint mt-0.5">{req.note || '端侧模型不随应用分发,首次使用需联网下载一次'}</div>
+                <div className="font-semibold">{KIND_TITLE[req.kind] || '端侧模型'}</div>
+                <div className="hint mt-0.5">
+                  {req.kind === 'mt'
+                    ? '端侧翻译为离线专用模型:不联网、不消耗额度,准确度低于云端大模型'
+                    : '模型不随应用分发,首次使用需联网下载一次;可随时在设置里换档或删除'}
+                </div>
               </div>
             </div>
-            <div className="inset px-3 py-2 text-[12.5px] space-y-1.5">
-              <div className="flex items-center gap-2">
-                <span className="text-muted w-[70px] shrink-0">下载内容</span>
-                <span className="truncate">{req.detail || '端侧模型'}</span>
+
+            {req.kind === 'mt' && (
+              <div className="inset px-3 py-2 mb-2 text-[12px]">
+                <b>准确度提示</b>:端侧专用翻译模型(opust-mt int8)质量中等,适合"看懂大意";
+                追求准确请把「翻译」开关切回<b>云端</b>。
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-muted w-[70px] shrink-0">体积</span>
-                <span>{req.size || '约 16-110 MB'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-muted w-[70px] shrink-0">保存位置</span>
-                <span className="truncate">models/ 目录(可在设置中删除)</span>
-              </div>
-            </div>
+            )}
+
+            {data ? (
+              <>
+                <ModelTiers kind={req.kind} tiers={tiers} current={current}
+                            busyTier={busyTier}
+                            onSelect={(t) => call('set_local_tier', req.kind, t).then(load)}
+                            onDownload={(t) => { setBusyTier(t); call('download_local_model', req.kind, t) }}
+                            onRemove={(t) => call('remove_local_model', req.kind, t).then((m) => { load(); if (req.onDone) req.onDone() })} />
+                {req.kind === 'runtime' && (
+                  <div className="hint mt-2">运行时约 62MB,只需下载一次(ctranslate2 + sentencepiece)</div>
+                )}
+                {req.kind === 'mt' && (
+                  <div className="inset px-3 py-2 mt-2 flex items-center gap-2 text-[12px]">
+                    <span className="text-muted shrink-0">端侧推理运行时</span>
+                    {data.runtime?.ready
+                      ? <span className="chip" style={{ color: 'var(--c-ok)', borderColor: 'var(--c-ok)' }}>已就绪</span>
+                      : <Btn className="!h-7 !text-[12px]" icon="download"
+                             onClick={() => { setBusyTier('__rt'); call('download_local_model', 'runtime') }}>下载运行时(约 62MB)</Btn>}
+                  </div>
+                )}
+                <div className="inset px-3 py-2 mt-2 flex items-center gap-2 text-[12px]">
+                  <span className="text-muted shrink-0">模型下载源</span>
+                  <Segmented size="sm" value={source}
+                             options={[{ value: 'auto', label: '自动' }, { value: 'hf', label: '官方' },
+                                       { value: 'mirror', label: 'hf-mirror' }]}
+                             onChange={(v) => call('set_local_tier', 'source', v).then(load)} />
+                  <span className="hint">国内网络建议 hf-mirror</span>
+                </div>
+              </>
+            ) : <div className="hint py-3 text-center">正在读取端侧模型状态…</div>}
+
             <div className="flex items-center gap-2 mt-3">
-              <span className="hint flex-1">下载完成后自动切换到端侧</span>
-              <Btn onClick={() => setReq(null)}>暂不</Btn>
-              <Btn primary icon="download" onClick={start}>立即下载</Btn>
+              <span className="hint flex-1">
+                {req.kind === 'ocr' ? '识别档位影响小字/表格的识别率;均衡档为推荐值'
+                  : '下载完成后会自动切换到端侧'}
+              </span>
+              <Btn onClick={close}>关闭</Btn>
             </div>
           </div>
         </div>

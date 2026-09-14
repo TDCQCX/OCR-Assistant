@@ -297,49 +297,89 @@ class Api:
         self.app.push({"type": "pack", "ok": ok, "message": msg})
         self.app.push({"type": "status", "text": msg, "tone": "ok" if ok else "danger"})
 
-    # ================= 端侧模型(按需下载) =================
+    # ================= 端侧模型(按需下载 / 分档) =================
     def local_models_status(self) -> dict:
         from app import local_models
         cfg_tr = self.app.cfg.get("translate") or {}
+        local = self.app.cfg.get("local") or {}
         st = local_models.summary()
         st["mt"] = local_models.mt_status(cfg_tr.get("source_lang", "自动检测"),
                                           cfg_tr.get("target_lang", "中文"))
+        cur_ocr = local_models.get_ocr_tier()
+        st["ocr"] = local_models.ocr_tier_status(cur_ocr)
+        st["tiers"] = {
+            "ocr": local_models.tier_list("ocr"),
+            "mt": local_models.tier_list("mt"),
+        }
+        st["current"] = {
+            "ocr": local_models.get_ocr_tier(),
+            "mt": local_models.get_mt_tier(),
+            "source": local_models.get_source(),
+        }
+        st["source"] = local_models.get_source()
         st["ocr_local"] = self.app.cfg.get("ocr", {}).get("mode", "cloud") == "local"
         st["mt_local"] = (cfg_tr.get("mode") or "cloud") == "local"
+        _ = local
         return st
 
-    def download_local_model(self, kind: str) -> bool:
-        """kind: ocr / runtime / mt"""
-        threading.Thread(target=self._download_model, args=(str(kind),), daemon=True).start()
+    def set_local_tier(self, kind: str, tier: str) -> dict:
+        """切换端侧档位(ocr / mt)或下载源(auto / hf / mirror),并持久化。"""
+        from app import local_models
+        cfg = self.app.cfg
+        local = cfg.setdefault("local", {})
+        if kind == "ocr":
+            local["ocr_tier"] = local_models.set_ocr_tier(str(tier))
+        elif kind == "mt":
+            local["mt_tier"] = local_models.set_mt_tier(str(tier))
+        elif kind == "source":
+            local["source"] = local_models.set_source(str(tier))
+        cfgmod.save_config(cfg)
+        self.app.push({"type": "config", "config": cfg})
+        return local
+
+    def download_local_model(self, kind: str, tier: str = "") -> bool:
+        """kind: ocr / mt / runtime;tier: 档位(可选)"""
+        threading.Thread(target=self._download_model, args=(str(kind), str(tier or "")),
+                         daemon=True).start()
         return True
 
-    def _download_model(self, kind: str):
+    def _download_model(self, kind: str, tier: str = ""):
         from app import local_models
         cfg_tr = self.app.cfg.get("translate") or {}
 
         def progress(pct, text):
-            self.app.push({"type": "download", "kind": kind, "pct": int(pct), "text": text})
+            self.app.push({"type": "download", "kind": kind, "tier": tier, "pct": int(pct), "text": text})
 
         try:
-            self.app.push({"type": "download", "kind": kind, "pct": 0, "text": "准备下载…"})
+            self.app.push({"type": "download", "kind": kind, "tier": tier, "pct": 0,
+                           "text": "准备下载…"})
             if kind == "ocr":
-                msg = local_models.download_ocr(progress)
+                msg = local_models.download_ocr(tier or local_models.get_ocr_tier(), progress)
             elif kind == "runtime":
                 msg = local_models.download_runtime(progress)
             elif kind == "mt":
-                msg = local_models.download_mt(cfg_tr.get("source_lang", "英语"),
-                                               cfg_tr.get("target_lang", "中文"), progress)
+                tier = tier or local_models.get_mt_tier()
+                if tier == "light":
+                    msg = local_models.download_mt(cfg_tr.get("source_lang", "英语"),
+                                                   cfg_tr.get("target_lang", "中文"), progress)
+                else:
+                    msg = local_models.download_mt_tier(tier, progress)
             else:
                 msg = "未知的模型类型"
-            self.app.push({"type": "download", "kind": kind, "pct": 100, "done": True, "message": msg})
+            self.app.push({"type": "download", "kind": kind, "tier": tier, "pct": 100,
+                           "done": True, "message": msg})
             self.app.push({"type": "status", "text": msg, "tone": "ok"})
         except Exception as exc:  # noqa: BLE001
-            self.app.push({"type": "download", "kind": kind, "pct": 0, "done": True,
+            self.app.push({"type": "download", "kind": kind, "tier": tier, "pct": 0, "done": True,
                            "error": str(exc)})
             self.app.push({"type": "status", "text": str(exc), "tone": "danger"})
 
-    def remove_local_model(self, kind: str) -> str:
+    def remove_local_model(self, kind: str, tier: str = "") -> str:
         from app import local_models
+        if kind == "ocr" and tier:
+            return local_models.remove_ocr_tier(tier)
+        if kind == "mt" and tier:
+            return local_models.remove_mt_tier(tier)
         return local_models.remove(str(kind))
 
     # ================= 剪贴板 =================
