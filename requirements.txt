@@ -1,3 +1,5 @@
+pywebview>=5.0
+qtpy>=2.4
 PySide6>=6.6
 mss>=9.0
 requests>=2.31

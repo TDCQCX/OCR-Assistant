@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* 默认(浅色)主题变量,运行时由 theme.js 覆盖 */
+  --c-bg: #f2f4f8;
+  --c-card: #ffffff;
+  --c-panel: rgba(255, 255, 255, 0.96);
+  --c-fg: #252b36;
+  --c-muted: #6e7686;
+  --c-line: #e3e7ef;
+  --c-accent: #2f6fed;
+  --c-accent-fg: #ffffff;
+  --c-ok: #3fb950;
+  --c-warn: #f5a623;
+  --c-danger: #f85149;
+  --radius: 12px;
+  --font-size: 13px;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: transparent;
+  color: var(--c-fg);
+  font-size: var(--font-size);
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* pywebview 拖拽区域 */
+.pywebview-drag-region { -webkit-app-region: drag; user-select: none; }
+
+/* 细滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--c-line); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--c-muted); }
+
+input, textarea, select, button { font-family: inherit; font-size: inherit; }
+input:focus, textarea:focus, select:focus { outline: none; }
+
+@layer components {
+  .card { @apply bg-card border border-line rounded-card; }
+  .ctl {
+    @apply bg-card border border-line rounded-ctl px-3 py-1.5 text-fg w-full
+           focus:border-accent transition-colors;
+  }
+  .btn {
+    @apply border border-line rounded-ctl px-3.5 py-1.5 font-medium transition-colors
+           hover:border-accent bg-card;
+  }
+  .btn-primary { @apply border-transparent text-accentfg font-semibold; background: var(--c-accent); }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .chip { @apply px-2 py-0.5 rounded-full text-[11px] border border-line text-muted; }
+  .hint { @apply text-muted text-[12px]; }
+}

@@ -111,23 +111,27 @@ DEFAULT_CONFIG = {
         "answer": DEFAULT_ANSWER_PROMPT,
     },
     "request_template": DEFAULT_REQUEST_TEMPLATE,
+    "mode": "overlay",                 # 运行模式: overlay=悬浮窗 / snip=自由截图 / mini=迷你条
+    "ui": {
+        "theme": "light",              # light / dark / gray / eyecare / contrast / custom
+        "customTheme": None,           # 自定义主题(theme=custom 时生效)
+        "radius": 12,                  # 全局圆角
+        "fontSize": 13,                # 全局字号
+        "panelOpacity": 96,            # 面板不透明度(%)
+        "holeColor": "#FF5252",        # 洞口边框颜色
+        "holeStyle": "dashed",         # solid / dashed / dotted
+        "holeRadius": 4,               # 洞口边框圆角
+    },
     "window": {
         "always_on_top": True,
         "width": 640,                  # 启动时的窗口尺寸(拖动后自动记忆更新)
         "height": 680,
-        "corner_radius": 12,           # 窗口圆角
-        "border_color": "#FF5252",     # 洞口边框颜色
-    },
-    "theme": {
-        "preset": "light",             # dark=黑色 / light=白色 / gray=灰色
-        "image": "",                   # 背景图片路径(空=纯色)
-        "image_scale": 100,            # 图片缩放百分比
-        "image_offset_x": 0,           # 图片 X 偏移
-        "image_offset_y": 0,           # 图片 Y 偏移
+        "miniWidth": 560,              # 迷你条尺寸
+        "miniHeight": 46,
     },
     "capture": {
         "max_side": 2048,              # 发送前图片长边压缩上限(px)
-        "flash_delay_ms": 60,          # 截图时边框瞬隐时长(毫秒)
+        "flash_delay_ms": 80,          # 截图瞬隐时长(毫秒)
     },
     "timeout": 180,                    # 模型最长响应时间(秒)
     "retry": {
@@ -151,11 +155,11 @@ DEFAULT_CONFIG = {
         "add_to_knowledge": False,               # 是否将 AI 回答自动添加到本地知识库
     },
     "app": {
-        "version": "1.0.0",
+        "version": "2.0.0",
         "github": "https://github.com/TDCQCX/OCR-Assistant",  # 关于页跳转地址
         "qq_group": "1108236960",
         "license": "MIT",
-        "features": "透明洞口截图 · 云端/本地OCR · 图文答题 · 多平台 · 本地知识库",
+        "features": "三种截图模式 · 双OCR · 图文答题 · 多平台 · 全局主题 · 识别历史",
     },
 }
 

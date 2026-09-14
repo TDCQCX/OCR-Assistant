@@ -3,8 +3,10 @@ __pycache__/
 *.pyc
 config.json
 request_log.json
+history.json
 cache/
 questions/
+node_modules/
 test_capture.png
 test_window_grab.png
 build/
