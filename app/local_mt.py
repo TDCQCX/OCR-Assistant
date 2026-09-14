@@ -98,9 +98,13 @@ def _clean(text: str) -> str:
 
 
 def translate_segments(segments: list, source_lang: str, target_lang: str) -> list:
-    """批量按段翻译(单次模型调用)。多语言模型走 NLLB 语言标记。"""
+    """批量按段翻译:官方 HF 模型走 transformers,其余走 CTranslate2。"""
     if not segments:
         return []
+    info = local_models.mt_tier_info(local_models.get_mt_tier())
+    if info.get("kind") == "hf":
+        from app import local_hf
+        return local_hf.translate_segments(segments, source_lang, target_lang)
     with _lock:
         translator, sp, meta = _load()
         if meta["multi"]:

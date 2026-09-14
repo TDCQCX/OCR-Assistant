@@ -317,6 +317,7 @@ class Api:
             "source": local_models.get_source(),
         }
         st["source"] = local_models.get_source()
+        st["hf_runtime"] = local_models.hf_runtime_status()
         st["ocr_local"] = self.app.cfg.get("ocr", {}).get("mode", "cloud") == "local"
         st["mt_local"] = (cfg_tr.get("mode") or "cloud") == "local"
         _ = local
@@ -359,11 +360,16 @@ class Api:
                 msg = local_models.download_runtime(progress)
             elif kind == "mt":
                 tier = tier or local_models.get_mt_tier()
-                if tier == "light":
+                info = local_models.mt_tier_info(tier)
+                if info.get("kind") == "hf":
+                    msg = local_models.download_hf_mt(tier, progress)
+                elif tier == "light":
                     msg = local_models.download_mt(cfg_tr.get("source_lang", "英语"),
                                                    cfg_tr.get("target_lang", "中文"), progress)
                 else:
                     msg = local_models.download_mt_tier(tier, progress)
+            elif kind == "hf_runtime":
+                msg = local_models.download_hf_runtime(progress)
             else:
                 msg = "未知的模型类型"
             self.app.push({"type": "download", "kind": kind, "tier": tier, "pct": 100,
@@ -379,6 +385,9 @@ class Api:
         if kind == "ocr" and tier:
             return local_models.remove_ocr_tier(tier)
         if kind == "mt" and tier:
+            info = local_models.mt_tier_info(tier)
+            if info.get("kind") == "hf":
+                return local_models.remove_hf_mt(tier)
             return local_models.remove_mt_tier(tier)
         return local_models.remove(str(kind))
 

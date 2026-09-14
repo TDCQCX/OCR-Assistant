@@ -424,13 +424,24 @@ export function DownloadHost({ children }) {
                   <div className="hint mt-2">运行时约 62MB,只需下载一次(ctranslate2 + sentencepiece)</div>
                 )}
                 {req.kind === 'mt' && (
-                  <div className="inset px-3 py-2 mt-2 flex items-center gap-2 text-[12px]">
-                    <span className="text-muted shrink-0">端侧推理运行时</span>
-                    {data.runtime?.ready
-                      ? <span className="chip" style={{ color: 'var(--c-ok)', borderColor: 'var(--c-ok)' }}>已就绪</span>
-                      : <Btn className="!h-7 !text-[12px]" icon="download"
-                             onClick={() => { setBusyTier('__rt'); call('download_local_model', 'runtime') }}>下载运行时(约 62MB)</Btn>}
-                  </div>
+                  <>
+                    <div className="inset px-3 py-2 mt-2 flex items-center gap-2 text-[12px]">
+                      <span className="text-muted shrink-0">轻量档运行时(CTranslate2)</span>
+                      {data.runtime?.ready
+                        ? <span className="chip" style={{ color: 'var(--c-ok)', borderColor: 'var(--c-ok)' }}>已就绪</span>
+                        : <Btn className="!h-7 !text-[12px]" icon="download"
+                               onClick={() => { setBusyTier('__rt'); call('download_local_model', 'runtime') }}>下载(约 62MB)</Btn>}
+                    </div>
+                    <div className="inset px-3 py-2 mt-2 flex items-center gap-2 text-[12px]">
+                      <span className="text-muted shrink-0">均衡/全量档运行时(官方模型)</span>
+                      {data.hf_runtime?.ready
+                        ? <span className="chip" style={{ color: 'var(--c-ok)', borderColor: 'var(--c-ok)' }}>已就绪</span>
+                        : <Btn className="!h-7 !text-[12px]" icon="download"
+                               onClick={() => { setBusyTier('__hfr'); call('download_local_model', 'hf_runtime') }}>
+                             下载(约 2.5GB,仅一次)</Btn>}
+                      <span className="hint">官方 NLLB 模型质量最好,但占用大、CPU 上较慢</span>
+                    </div>
+                  </>
                 )}
                 <div className="inset px-3 py-2 mt-2 flex items-center gap-2 text-[12px]">
                   <span className="text-muted shrink-0">模型下载源</span>

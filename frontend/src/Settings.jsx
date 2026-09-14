@@ -470,7 +470,7 @@ function TranslatePage() {
                 ? <span className="chip" style={{ color: 'var(--c-ok)', borderColor: 'var(--c-ok)' }}>已就绪</span>
                 : <Btn className="!h-7 !text-[12px]" icon="download"
                        onClick={() => { call('download_local_model', 'runtime'); toast('已开始下载运行时') }}>下载(约 62MB)</Btn>}
-              <span className="hint">端侧翻译准确度有限,追求质量请用云端</span>
+              <span className="hint">轻量档准确度有限,追求质量请用云端或均衡/全量档</span>
             </div>
           </div>
           <div className="hint">模型目录:{models?.root || 'models/'}(删除档位即释放对应空间)</div>

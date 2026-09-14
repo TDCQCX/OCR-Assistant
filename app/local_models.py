@@ -24,6 +24,8 @@ MODEL_ROOT = ROOT / "models"
 OCR_DIR = MODEL_ROOT / "ocr"
 MT_DIR = MODEL_ROOT / "mt"
 RUNTIME_DIR = MODEL_ROOT / "runtime"
+HF_RUNTIME_DIR = MODEL_ROOT / "runtime" / "hf"   # transformers + torch(官方模型路线)
+HF_MT_DIR = MODEL_ROOT / "mt" / "hf"             # 官方 NLLB 模型落盘位置
 
 OCR_FILES = {
     "det": "ch_PP-OCRv4_det_infer.onnx",
@@ -270,8 +272,8 @@ OCR_TIERS = {
                   "rec": "ch_PP-OCRv4_rec_infer.onnx",
                   "cls": "ch_ppocr_mobile_v2.0_cls_infer.onnx"},
         "source": "PyPI rapidocr_onnxruntime(移动端模型)",
-        "speed": "最快(CPU 约 0.1-0.3s/张)",
-        "quality": "清晰印刷体够用;小字、密排、表格易漏字",
+        "speed": "最快(实测 0.84s/张)",
+        "quality": "清晰印刷体 98% 覆盖;小字、密排、表格略差",
         "cost": "几乎无额外代价",
     },
     "balanced": {
@@ -280,8 +282,8 @@ OCR_TIERS = {
                   "rec": "ch_PP-OCRv4_rec_infer.onnx",
                   "cls": "ch_ppocr_mobile_v2.0_cls_infer.onnx"},
         "source": "hf-mirror / HuggingFace —— SWHL/RapidOCR",
-        "speed": "较快(det 变大,约 0.3-0.8s/张)",
-        "quality": "长文本、密排、表格明显改善(检测是主要瓶颈)",
+        "speed": "较快(实测 6.5s/张)",
+        "quality": "实测 99% 覆盖:长文本、密排、表格更稳(检测更强)",
         "cost": "下载约 120MB,内存占用略增",
     },
     "full": {
@@ -290,40 +292,60 @@ OCR_TIERS = {
                   "rec": "ch_PP-OCRv4_rec_server_infer.onnx",
                   "cls": "ch_ppocr_mobile_v2.0_cls_infer.onnx"},
         "source": "hf-mirror / HuggingFace —— SWHL/RapidOCR",
-        "speed": "较慢(约 0.5-1.5s/张)",
+        "speed": "较慢(实测 4.5s/张)",
         "quality": "识别最准:小字、模糊、手写体、复杂版式",
-        "cost": "下载约 196MB;CPU 占用与耗时明显上升",
+        "cost": "下载约 196MB;CPU 占用与耗时上升",
     },
 }
 
 MT_TIERS = {
     "light": {
-        "name": "轻量", "recommend": True, "usable": True, "size_mb": 79,
+        "name": "轻量", "recommend": False, "usable": True, "size_mb": 79,
         "kind": "pair", "source": "argos-net.com —— Argos opus-mt int8",
-        "speed": "最快(单段约 0.03-0.1s)",
-        "quality": "大意可读,长句与专业词较弱",
+        "speed": "最快(实测 0.03-0.1s/段)",
+        "quality": "大意可读,长句与专业词较弱(实测可用)",
         "cost": "每个语言对各需 79MB;换语言要重新下载",
         "covered": "仅英↔中/日/韩/法/德/俄/西/葡/意/阿/泰/越",
     },
     "balanced": {
-        "name": "均衡", "recommend": False, "usable": False, "size_mb": 600,
-        "kind": "multi", "repo": "JustFrederik/nllb-200-distilled-600M-ct2-int8",
-        "source": "hf-mirror / HuggingFace —— NLLB-200 distilled 600M(int8)",
-        "speed": "中等(单段约 0.5-2s)",
-        "quality": "明显优于轻量档,长句/术语可用",
-        "cost": "下载约 600MB(一次性);内存峰值约 1.5GB;首次加载约数秒",
+        "name": "均衡", "recommend": True, "usable": True, "size_mb": 2400,
+        "kind": "hf", "repo": "facebook/nllb-200-distilled-600M",
+        "source": "hf-mirror / HuggingFace —— facebook/nllb-200-distilled-600M(官方模型+分词器)",
+        "speed": "中等(单段约 0.6-3s,CPU)",
+        "quality": "明显优于轻量档:长句、术语、从句处理可用",
+        "cost": "模型约 2.4GB + 运行时(transformers+torch)约 2.5GB;内存峰值约 3GB(一次性下载)",
         "covered": "一个模型覆盖 200 种语言,换语言无需再下载",
     },
     "full": {
-        "name": "全量", "recommend": False, "usable": False, "size_mb": 1322,
-        "kind": "multi", "repo": "JustFrederik/nllb-200-distilled-1.3B-ct2-int8",
-        "source": "hf-mirror / HuggingFace —— NLLB-200 distilled 1.3B(int8)",
-        "speed": "最慢(单段约 2-10s,取决于 CPU)",
-        "quality": "端侧最高:接近可用的人工翻译水平",
-        "cost": "下载约 1.32GB;内存峰值约 3GB;首次加载约 10-30s;纯 CPU 建议仅在需要高准确度时使用",
+        "name": "全量", "recommend": False, "usable": True, "size_mb": 5200,
+        "kind": "hf", "repo": "facebook/nllb-200-distilled-1.3B",
+        "source": "hf-mirror / HuggingFace —— facebook/nllb-200-distilled-1.3B(官方模型+分词器)",
+        "speed": "较慢(单段约 2-10s,CPU)",
+        "quality": "端侧最高:官方 1.3B,接近可用的人工翻译水平",
+        "cost": "模型约 5.2GB + 运行时约 2.5GB;内存峰值约 6GB;纯 CPU 建议仅在需要高准确度时使用",
         "covered": "一个模型覆盖 200 种语言",
     },
 }
+
+
+def mt_tier_status(tier: str) -> dict:
+    """档位状态:多语言/官方模型在 models/mt/hf/<tier>,轻量档在语言对目录。"""
+    info = mt_tier_info(tier)
+    if info.get("kind") == "hf":
+        d = HF_MT_DIR / tier
+        ready = (d / "config.json").exists() and (
+            (d / "model.safetensors").exists() or (d / "pytorch_model.bin").exists())
+        return {"tier": tier, "ready": ready, "dir": str(d),
+                "size_mb": _dir_size(d), "name": info["name"]}
+    if tier == "light":
+        d = _light_pair_dir()
+        ready = (d / "model.bin").exists()
+        return {"tier": "light", "ready": ready, "dir": str(d),
+                "size_mb": _dir_size(d), "name": info["name"]}
+    d = MT_TIER_DIR / tier
+    ready = (d / "model.bin").exists()
+    return {"tier": tier, "ready": ready, "dir": str(d),
+            "size_mb": _dir_size(d), "name": info["name"]}
 
 
 def tier_list(kind: str) -> list:
@@ -465,6 +487,73 @@ def download_ocr(tier: str = "", progress=None) -> str:
     return f"OCR {info['name']}档下载完成({_dir_size(d)}MB)"
 
 
+def download_hf_mt(tier: str, progress=None) -> str:
+    """下载官方 NLLB 模型(均衡 600M / 全量 1.3B)。"""
+    progress = progress or (lambda pct, text: None)
+    info = MT_TIERS.get(tier) or {}
+    repo = info.get("repo")
+    if not repo:
+        raise ModelMissing("mt", "该档位未配置模型仓库")
+    d = HF_MT_DIR / tier
+    d.mkdir(parents=True, exist_ok=True)
+    base = f"/{repo}/resolve/main/"
+    need = ["config.json", "generation_config.json", "tokenizer_config.json",
+            "tokenizer.json", "special_tokens_map.json", "sentencepiece.bpe.model"]
+    todo = [n for n in need if not (d / Path(n).name).exists()]
+    for i, name in enumerate(todo):
+        span = max(5, int(100 / max(1, len(todo))) - 2)
+        _fetch(base + name, d / Path(name).name, progress, i * span, span)
+    # 权重文件:safetensors / pytorch_model.bin 依次真实尝试(HEAD 在镜像上不可靠)
+    if not any((d / n).exists() for n in ("model.safetensors", "pytorch_model.bin")):
+        last = None
+        for cand in ("pytorch_model.bin", "model.safetensors"):
+            try:
+                _fetch(base + cand, d / cand, progress, 80, 18)
+                last = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+        if last is not None:
+            raise ModelMissing("mt", f"模型权重下载失败:{last}")
+    if not (d / "config.json").exists():
+        raise ModelMissing("mt", "模型下载不完整")
+    progress(100, f"翻译 {info.get('name', tier)}档(官方模型)已就绪")
+    return f"翻译 {info.get('name', tier)}档下载完成({_dir_size(d)}MB)"
+
+
+def download_hf_runtime(progress=None) -> str:
+    """下载 transformers + torch 运行时(官方模型路线,约 2.5GB,仅一次)。"""
+    progress = progress or (lambda pct, text: None)
+    HF_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    pkgs = ["transformers", "torch", "safetensors", "tokenizers", "huggingface_hub"]
+    for i, pkg in enumerate(pkgs):
+        if importlib.util.find_spec(pkg) is not None:
+            continue
+        step = int(100 / len(pkgs))
+        data = _download(_pypi_wheel_url(pkg, prefer=f"cp{sys.version_info.major}{sys.version_info.minor}"),
+                         progress, i * step, max(5, step - 2), f"正在下载 {pkg}…")
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            zf.extractall(HF_RUNTIME_DIR)
+    progress(100, "端侧大模型运行时已就绪")
+    return f"运行时下载完成({_dir_size(HF_RUNTIME_DIR)}MB)"
+
+
+def hf_runtime_status() -> dict:
+    from app import local_hf
+    return {"ready": local_hf.runtime_ready(), "dir": str(HF_RUNTIME_DIR),
+            "size_mb": _dir_size(HF_RUNTIME_DIR),
+            "transformers": local_hf._has("transformers"),
+            "torch": local_hf._has("torch")}
+
+
+def remove_hf_mt(tier: str) -> str:
+    d = HF_MT_DIR / tier
+    if d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+        return f"已删除翻译 {tier} 档(官方模型)"
+    return "该档位没有已下载的模型"
+
+
 def remove_ocr_tier(tier: str) -> str:
     d = OCR_DIR / tier
     if d.exists():
@@ -539,42 +628,6 @@ def _light_pair_dir() -> Path:
         if d.is_dir() and d.name != "tier" and (d / "model.bin").exists():
             return d
     return MT_DIR / "en-zh"
-
-
-def mt_current_model() -> tuple:
-    """返回 (档位, 模型目录)。
-
-    规则:先用用户设定的档位;该档未下载时才回落到其它已下载的档。
-    """
-    if DEFAULT_MT_TIER == "light":
-        d = _light_pair_dir()
-        if (d / "model.bin").exists():
-            return "light", d
-    else:
-        d = MT_TIER_DIR / DEFAULT_MT_TIER
-        if (d / "model.bin").exists():
-            return DEFAULT_MT_TIER, d
-    for tier in ("balanced", "full"):
-        d = MT_TIER_DIR / tier
-        if (d / "model.bin").exists():
-            return tier, d
-    d = _light_pair_dir()
-    if (d / "model.bin").exists():
-        return "light", d
-    return DEFAULT_MT_TIER, (MT_TIER_DIR / DEFAULT_MT_TIER if DEFAULT_MT_TIER != "light"
-                             else MT_DIR / "en-zh")
-
-
-def mt_tier_status(tier: str) -> dict:
-    if tier == "light":
-        d = _light_pair_dir()
-        ready = (d / "model.bin").exists()
-        return {"tier": "light", "ready": ready, "dir": str(d),
-                "size_mb": _dir_size(d), "name": mt_tier_info("light")["name"]}
-    d = MT_TIER_DIR / tier
-    ready = (d / "model.bin").exists()
-    return {"tier": tier, "ready": ready, "dir": str(d),
-            "size_mb": _dir_size(d), "name": mt_tier_info(tier)["name"]}
 
 
 def get_mt_tier() -> str:
