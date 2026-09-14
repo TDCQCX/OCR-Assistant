@@ -261,6 +261,230 @@ def summary() -> dict:
             "runtime": runtime_status(), "total_mb": _dir_size(MODEL_ROOT)}
 
 
+# ================= 档位定义(界面展示 + 下载选择) =================
+# 每档包含:名称、体积、来源、语言覆盖,以及给用户看的「代价」说明。
+OCR_TIERS = {
+    "light": {
+        "name": "轻量", "recommend": False, "size_mb": 16,
+        "files": {"det": "ch_PP-OCRv4_det_infer.onnx",
+                  "rec": "ch_PP-OCRv4_rec_infer.onnx",
+                  "cls": "ch_ppocr_mobile_v2.0_cls_infer.onnx"},
+        "source": "PyPI rapidocr_onnxruntime(移动端模型)",
+        "speed": "最快(CPU 约 0.1-0.3s/张)",
+        "quality": "清晰印刷体够用;小字、密排、表格易漏字",
+        "cost": "几乎无额外代价",
+    },
+    "balanced": {
+        "name": "均衡", "recommend": True, "size_mb": 120,
+        "files": {"det": "ch_PP-OCRv4_det_server_infer.onnx",
+                  "rec": "ch_PP-OCRv4_rec_infer.onnx",
+                  "cls": "ch_ppocr_mobile_v2.0_cls_infer.onnx"},
+        "source": "hf-mirror / HuggingFace —— SWHL/RapidOCR",
+        "speed": "较快(det 变大,约 0.3-0.8s/张)",
+        "quality": "长文本、密排、表格明显改善(检测是主要瓶颈)",
+        "cost": "下载约 120MB,内存占用略增",
+    },
+    "full": {
+        "name": "全量", "recommend": False, "size_mb": 196,
+        "files": {"det": "ch_PP-OCRv4_det_server_infer.onnx",
+                  "rec": "ch_PP-OCRv4_rec_server_infer.onnx",
+                  "cls": "ch_ppocr_mobile_v2.0_cls_infer.onnx"},
+        "source": "hf-mirror / HuggingFace —— SWHL/RapidOCR",
+        "speed": "较慢(约 0.5-1.5s/张)",
+        "quality": "识别最准:小字、模糊、手写体、复杂版式",
+        "cost": "下载约 196MB;CPU 占用与耗时明显上升",
+    },
+}
+
+MT_TIERS = {
+    "light": {
+        "name": "轻量", "recommend": False, "size_mb": 79,
+        "kind": "pair", "source": "argos-net.com —— Argos opus-mt int8",
+        "speed": "最快(单段约 0.03-0.1s)",
+        "quality": "大意可读,长句与专业词较弱",
+        "cost": "每个语言对各需 79MB;换语言要重新下载",
+        "covered": "仅英↔中/日/韩/法/德/俄/西/葡/意/阿/泰/越",
+    },
+    "balanced": {
+        "name": "均衡", "recommend": True, "size_mb": 600,
+        "kind": "multi", "repo": "JustFrederik/nllb-200-distilled-600M-ct2-int8",
+        "source": "hf-mirror / HuggingFace —— NLLB-200 distilled 600M(int8)",
+        "speed": "中等(单段约 0.5-2s)",
+        "quality": "明显优于轻量档,长句/术语可用",
+        "cost": "下载约 600MB(一次性);内存峰值约 1.5GB;首次加载约数秒",
+        "covered": "一个模型覆盖 200 种语言,换语言无需再下载",
+    },
+    "full": {
+        "name": "全量", "recommend": False, "size_mb": 1322,
+        "kind": "multi", "repo": "JustFrederik/nllb-200-distilled-1.3B-ct2-int8",
+        "source": "hf-mirror / HuggingFace —— NLLB-200 distilled 1.3B(int8)",
+        "speed": "最慢(单段约 2-10s,取决于 CPU)",
+        "quality": "端侧最高:接近可用的人工翻译水平",
+        "cost": "下载约 1.32GB;内存峰值约 3GB;首次加载约 10-30s;纯 CPU 建议仅在需要高准确度时使用",
+        "covered": "一个模型覆盖 200 种语言",
+    },
+}
+
+
+def tier_list(kind: str) -> list:
+    """档位清单(供界面展示)。"""
+    table = OCR_TIERS if kind == "ocr" else MT_TIERS
+    out = []
+    for key, info in table.items():
+        st = ocr_tier_status(key) if kind == "ocr" else None
+        item = {"key": key, **{k: v for k, v in info.items() if k not in ("files", "repo")}}
+        if st:
+            item.update({"ready": st["ready"], "size_on_disk": st["size_mb"]})
+        out.append(item)
+    return out
+
+
+# ================= OCR 分档 =================
+def ocr_tier_status(tier: str) -> dict:
+    info = OCR_TIERS.get(tier) or OCR_TIERS["light"]
+    d = OCR_DIR / tier
+    missing = [n for n in info["files"].values() if not (d / n).exists()]
+    if tier == "light" and missing and not (OCR_DIR / "light").exists():
+        # 轻量档兼容旧版落盘位置
+        legacy = OCR_DIR
+        if all((legacy / n).exists() for n in info["files"].values()):
+            missing = []
+    return {"tier": tier, "ready": not missing, "dir": str(d), "missing": missing,
+            "size_mb": _dir_size(d)}
+
+
+def current_ocr_tier() -> str:
+    """当前生效档位:优先配置的默认档;若该档未下载而其它档已下载,则用已下载的档,避免"切档后反而不可用"。"""
+    if ocr_tier_status(DEFAULT_OCR_TIER)["ready"]:
+        return DEFAULT_OCR_TIER
+    for key in ("light", "balanced", "full"):
+        if ocr_tier_status(key)["ready"]:
+            return key
+    return DEFAULT_OCR_TIER
+
+
+def set_ocr_tier(tier: str) -> str:
+    global DEFAULT_OCR_TIER
+    if tier in OCR_TIERS:
+        DEFAULT_OCR_TIER = tier
+    return DEFAULT_OCR_TIER
+
+
+def ocr_model_paths() -> dict:
+    """按当前档位返回模型路径;缺失时回退内置包内模型(源码环境)。"""
+    tier = current_ocr_tier()
+    d = OCR_DIR / tier
+    info = OCR_TIERS[tier]
+    if all((d / n).exists() for n in info["files"].values()):
+        return {k: str(d / n) for k, n in info["files"].items()}
+    if tier == "light" and all((OCR_DIR / n).exists() for n in info["files"].values()):
+        return {k: str(OCR_DIR / n) for k, n in info["files"].items()}
+    spec = importlib.util.find_spec("rapidocr_onnxruntime")
+    if spec and spec.origin:
+        bundled = Path(spec.origin).parent / "models"
+        if all((bundled / n).exists() for n in OCR_FILES.values()):
+            return {"det": str(bundled / OCR_FILES["det"]), "rec": str(bundled / OCR_FILES["rec"]),
+                    "cls": str(bundled / OCR_FILES["cls"])}
+    return {}
+
+
+def download_ocr(tier: str = "", progress=None) -> str:
+    """下载指定档位的 OCR 端侧模型。"""
+    progress = progress or (lambda pct, text: None)
+    tier = tier or current_ocr_tier()
+    info = OCR_TIERS.get(tier) or OCR_TIERS["light"]
+    d = OCR_DIR / tier
+    d.mkdir(parents=True, exist_ok=True)
+    if tier == "light":
+        # 轻量档直接从 PyPI wheel 取移动端模型
+        progress(2, "正在解析下载地址…")
+        data = _download(_pypi_wheel_url("rapidocr_onnxruntime"), progress, 5, 85, "正在下载模型包…")
+        progress(92, "正在解压模型…")
+        count = 0
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for item in zf.infolist():
+                name = Path(item.filename).name
+                if name in info["files"].values():
+                    with zf.open(item) as src, open(d / name, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    count += 1
+        if count < len(info["files"]):
+            raise ModelMissing("ocr", f"模型包内容不完整(找到 {count} 个文件)")
+    else:
+        # 均衡/全量:从 HuggingFace(或镜像)取 PP-OCR server 模型
+        repo = "SWHL/RapidOCR"
+        need = [(f"PP-OCRv4/{n}", d / n) for n in info["files"].values()]
+        todo = [(src, dst) for src, dst in need if not dst.exists()]
+        todo.sort(key=lambda x: x[1].name == info["files"]["cls"], reverse=True)
+        for i, (src, dst) in enumerate(todo):
+            base = int(i / max(1, len(todo)) * 100)
+            span = int(100 / max(1, len(todo))) - 2
+            _fetch(f"/{repo}/resolve/main/{src}", dst, progress, base, span)
+    progress(100, f"{info['name']}档模型已就绪")
+    return f"OCR {info['name']}档下载完成({_dir_size(d)}MB)"
+
+
+def remove_ocr_tier(tier: str) -> str:
+    d = OCR_DIR / tier
+    if d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+        return f"已删除 OCR {tier} 档模型"
+    return "该档位没有已下载的模型"
+
+
+HF_HOSTS = {"hf": "https://huggingface.co", "mirror": "https://hf-mirror.com"}
+DEFAULT_SOURCE = "auto"          # auto=先官方后镜像; hf=只用官方; mirror=只用 hf-mirror
+DEFAULT_OCR_TIER = "balanced"    # 默认档位:均衡
+DEFAULT_MT_TIER = "balanced"
+
+
+def set_source(source: str) -> str:
+    """设置模型下载源(auto / hf / mirror)。"""
+    global DEFAULT_SOURCE
+    if source in HF_HOSTS or source == "auto":
+        DEFAULT_SOURCE = source
+    return DEFAULT_SOURCE
+
+
+def get_source() -> str:
+    return DEFAULT_SOURCE
+
+
+def _hosts() -> tuple:
+    if DEFAULT_SOURCE == "hf":
+        return (HF_HOSTS["hf"],)
+    if DEFAULT_SOURCE == "mirror":
+        return (HF_HOSTS["mirror"],)
+    return (HF_HOSTS["hf"], HF_HOSTS["mirror"])
+
+
+def _fetch(url: str, dest: Path, progress=None, base_pct: int = 0, span: int = 100) -> None:
+    """从 HuggingFace(按设置的源与镜像回退)下载单个文件。"""
+    progress = progress or (lambda pct, text: None)
+    last_err = None
+    for host in _hosts():
+        for _ in range(2):
+            try:
+                with requests.get(host + url, timeout=TIMEOUT, stream=True) as resp:
+                    resp.raise_for_status()
+                    total = int(resp.headers.get("Content-Length") or 0)
+                    got = 0
+                    tmp = dest.with_suffix(dest.suffix + ".part")
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    with open(tmp, "wb") as fh:
+                        for chunk in resp.iter_content(262144):
+                            fh.write(chunk)
+                            got += len(chunk)
+                            if total:
+                                progress(base_pct + int(got / total * span),
+                                         f"{dest.name} {got / 1048576:.1f}MB")
+                    tmp.replace(dest)
+                    return
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+    raise ModelMissing("mt", f"下载 {dest.name} 失败:{last_err}")
+
+
 def remove(kind: str) -> str:
     targets = {"ocr": OCR_DIR, "mt": MT_DIR, "runtime": RUNTIME_DIR, "all": MODEL_ROOT}
     path = targets.get(kind)
