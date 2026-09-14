@@ -213,7 +213,7 @@ DEFAULT_CONFIG = {
         "add_to_knowledge": False,               # 是否将 AI 回答自动添加到本地知识库
     },
     "app": {
-        "version": "2.5.0",
+        "version": "2.4.0",
         "github": "https://github.com/TDCQCX/OCR-Assistant",  # 关于页跳转地址
         "qq_group": "1108236960",
         "license": "CC BY-NC 4.0",

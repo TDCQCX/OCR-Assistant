@@ -8,7 +8,7 @@
 ![pywebview](https://img.shields.io/badge/Shell-pywebview%20%2B%20Qt-41CD52?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey)
-![Version](https://img.shields.io/badge/Version-2.5.0-orange)
+![Version](https://img.shields.io/badge/Version-2.4.0-orange)
 
 > **OCR Assistant** — a desktop tool with three capture modes, cloud/local OCR and LLM-powered image-and-text Q&A.
 > The interface is built with **React 18 + Tailwind CSS**; the backend is Python (capture / OCR / model calls / configuration).
