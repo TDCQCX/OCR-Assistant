@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
-import { EngineSwitch, Icon, IconBtn, IconSeg, QBox, Tip, useWindowDrag } from './ui'
+import { EngineSwitch, Icon, IconBtn, IconSeg, QBox, ResizeHandles, Tip, useWindowDrag } from './ui'
 
 const MODES = [
   { value: 'overlay', label: '悬浮窗', icon: 'overlay' },
@@ -26,9 +26,11 @@ export default function MiniBar() {
 
   return (
     <div
-      className="h-full w-full flex flex-col rounded-card border border-line overflow-hidden"
+      className="h-full w-full flex flex-col rounded-card border border-line overflow-hidden relative"
       style={{ background: 'var(--c-panel)', boxShadow: 'var(--c-shadow)' }}
     >
+      {/* 拖动左右边缘可加宽:超过阈值自动切回悬浮窗模式 */}
+      <ResizeHandles which="mini" />
       {/* 第一行:图标工具栏 */}
       <div className="flex items-center gap-2 px-2 h-[38px] drag-handle" {...drag}>
         <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag" title="OCR 助手">O</span>

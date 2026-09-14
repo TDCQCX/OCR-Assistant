@@ -294,14 +294,38 @@ def pairs_from_text(text: str, source_text: str) -> list:
 
 
 def parse_translation_output(raw: str, segments: list) -> list:
-    """解析云端翻译结果:优先按 JSON 数组(逐段),否则退化为逐行对齐。"""
+    """解析云端翻译结果:优先按 JSON 数组(逐段),否则退化为逐行对齐。
+
+    同时清理模型偶尔回显的提示词内容,避免把提示词当成译文展示。
+    """
     txt = (raw or "").strip().replace("```json", "").replace("```", "").strip()
     if txt.startswith("["):
         try:
             arr = json.loads(txt[txt.find("["):txt.rfind("]") + 1])
-            if isinstance(arr, list) and arr:
+            items = [str(v) for v in arr if v is not None and not is_prompt_leak(str(v))]
+            if items:
                 return [{"src": segments[i] if i < len(segments) else "",
-                         "dst": str(v).strip()} for i, v in enumerate(arr)]
+                         "dst": items[i].strip()} for i in range(len(items))]
         except Exception:
             pass
-    return pairs_from_text(txt, "\n".join(segments))
+    return pairs_from_text(strip_prompt_leak(txt), "\n".join(segments))
+
+
+# 提示词回显特征:整行属于提示词模板时丢弃
+_PROMPT_MARKS = (
+    "你是专业翻译引擎", "你是通用识别与问答助手", "输入共", "待翻译内容",
+    "请严格按段翻译", "要求:", "示例:输入", "只输出一个 JSON", "不要输出任何解释",
+    "来源语言:", "目标语言:", "用户的指令:", "OCR识别结果", "附加要求:",
+)
+
+
+def is_prompt_leak(text: str) -> bool:
+    s = (text or "").strip()
+    if not s or len(s) > 120:
+        return False
+    return any(mark in s for mark in _PROMPT_MARKS)
+
+
+def strip_prompt_leak(text: str) -> str:
+    """丢弃译文里混入的提示词行。"""
+    return "\n".join(line for line in _split_lines(text) if not is_prompt_leak(line)).strip()
