@@ -4,6 +4,7 @@
 前端通过 window.pywebview.api.<method>(...) 调用,返回值需可 JSON 序列化。
 """
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -179,20 +180,26 @@ class Api:
         return True
 
     def test_connection(self, i: int) -> dict:
-        """连通性测试:返回 {ok, ms, message}"""
+        """连通性测试:后台线程执行,结果通过 conn 事件推送给前端(避免阻塞界面)。"""
+        threading.Thread(target=self._test_connection, args=(int(i),), daemon=True).start()
+        return {"started": True}
+
+    def _test_connection(self, i: int):
         cfg = self.app.cfg
         provs = cfg.get("providers", [])
-        if not (0 <= int(i) < len(provs)):
-            return {"ok": False, "ms": 0, "message": "平台不存在"}
-        p = provs[int(i)]
+        if not (0 <= i < len(provs)):
+            self.app.push({"type": "conn", "i": i, "ok": False, "ms": 0, "message": "平台不存在"})
+            return
+        p = provs[i]
         if not (p.get("api_key") or "").strip():
-            return {"ok": False, "ms": 0, "message": "未配置 API Key"}
+            self.app.push({"type": "conn", "i": i, "ok": False, "ms": 0, "message": "未配置 API Key"})
+            return
         t0 = time.time()
         client = AgentClient(p.get("api_key", ""), p.get("model", ""), p.get("base_url", ""),
                              timeout=min(int(cfg.get("timeout", 180)), 20))
         msg = client.test_connection()
         ms = int((time.time() - t0) * 1000)
-        return {"ok": msg.startswith("连接成功"), "ms": ms, "message": msg}
+        self.app.push({"type": "conn", "i": i, "ok": msg.startswith("连接成功"), "ms": ms, "message": msg})
 
     # ================= 主题 =================
     def export_theme(self, theme_json: str) -> bool:
@@ -228,6 +235,19 @@ class Api:
     def set_mode(self, mode: str) -> bool:
         self.app.set_mode(mode)
         return True
+
+    # ================= 窗口拖动 / 洞口穿透 =================
+    def drag_begin(self, which: str, sx: float, sy: float) -> bool:
+        return self.app.drag_begin(which, sx, sy)
+
+    def drag_move(self, which: str, sx: float, sy: float) -> bool:
+        return self.app.drag_move(which, sx, sy)
+
+    def drag_end(self, which: str) -> bool:
+        return self.app.drag_end(which)
+
+    def set_hole_region(self, rect: dict) -> bool:
+        return self.app.set_hole_region(rect or {})
 
     def start_snip(self):
         self.app.start_snip()

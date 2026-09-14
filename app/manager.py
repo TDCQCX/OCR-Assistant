@@ -5,6 +5,7 @@
 """
 import json
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -40,6 +41,13 @@ class App:
         self._worker = None
         self._lock = threading.Lock()
         self._api = None
+        self._drag = None
+        self._hole_key = None
+        self._prev_mode = None
+        # 前端事件统一由独立线程推送:evaluate_js 会阻塞等待 JS 结果,
+        # 若在 Qt 主线程调用会死锁(界面无响应),因此必须走非 GUI 线程。
+        self._push_q = queue.Queue(maxsize=128)
+        threading.Thread(target=self._push_loop, daemon=True, name="push").start()
 
     # ================= 启动与窗口 =================
     def start(self):
@@ -47,6 +55,18 @@ class App:
         self._register_hotkeys()
         # Qt(WebEngine)后端:透明/无边框/置顶/拖拽均支持
         webview.start(gui="qt", debug=False)
+
+    def _push_loop(self):
+        while True:
+            payload = self._push_q.get()
+            js = f"window.__ocrEvent && window.__ocrEvent({json.dumps(payload, ensure_ascii=False)})"
+            for win in (self.overlay, self.mini, self.settings, self.snip):
+                if win is None:
+                    continue
+                try:
+                    win.evaluate_js(js)
+                except Exception:
+                    pass
 
     def _create_windows(self):
         cfg = self.cfg
@@ -60,12 +80,12 @@ class App:
 
         self.overlay = webview.create_window(
             "OCR 助手", _url("overlay"), js_api=api, width=w, height=h,
-            frameless=True, easy_drag=True, on_top=on_top, transparent=True,
+            frameless=True, easy_drag=False, on_top=on_top, transparent=True,
             hidden=mini_mode, text_select=True,
         )
         self.mini = webview.create_window(
             "OCR 助手", _url("mini"), js_api=api, width=mw, height=mh,
-            frameless=True, easy_drag=True, on_top=on_top, transparent=True,
+            frameless=True, easy_drag=False, on_top=on_top, transparent=True,
             hidden=not mini_mode,
         )
         self.settings = webview.create_window(
@@ -92,26 +112,23 @@ class App:
 
     # ================= 事件推送 =================
     def push(self, payload: dict):
-        js = f"window.__ocrEvent && window.__ocrEvent({json.dumps(payload, ensure_ascii=False)})"
-
-        def do():
-            for win in (self.overlay, self.mini, self.settings, self.snip):
-                if not win:
-                    continue
-                try:
-                    win.evaluate_js(js)
-                except Exception:
-                    pass
-
-        run_in_main(do)
+        """投递前端事件(由独立线程执行,绝不在 Qt 主线程评估 JS)。"""
+        try:
+            self._push_q.put_nowait(payload)
+        except queue.Full:
+            pass
 
     # ================= 模式切换 =================
     def set_mode(self, mode: str):
         if mode not in ("overlay", "snip", "mini"):
             return
+        if mode == self.cfg.get("mode") and mode != "snip":
+            return
 
         def do():
             if mode == "snip":
+                if self.cfg.get("mode") != "snip":
+                    self._prev_mode = self.cfg.get("mode") or "overlay"
                 self.overlay.hide()
                 self.mini.hide()
                 self.snip.show()
@@ -119,6 +136,7 @@ class App:
                 self.snip.hide()
                 self.overlay.hide()
                 self.mini.show()
+                self._place_mini_default()
             else:
                 self.snip.hide()
                 self.mini.hide()
@@ -128,6 +146,162 @@ class App:
 
         run_in_main(do)
         self.push({"type": "config", "config": self.cfg})
+
+    # ================= 迷你条默认位置(任务栏上方居中) =================
+    def _place_mini_default(self):
+        """首次进入迷你条模式时,把它居中放在任务栏(工作区)上方。"""
+        win_cfg = self.cfg.setdefault("window", {})
+        if win_cfg.get("mini_x") is not None and win_cfg.get("mini_y") is not None:
+            return
+        try:
+            from PySide6.QtGui import QGuiApplication
+            screen = QGuiApplication.primaryScreen()
+            g = screen.availableGeometry()  # 已排除任务栏,逻辑像素
+            w = int(win_cfg.get("miniWidth", 380))
+            h = int(win_cfg.get("miniHeight", 40))
+            x = int(g.x() + (g.width() - w) / 2)
+            y = int(g.y() + g.height() - h - 18)
+            self.mini.move(x, y)
+            win_cfg["mini_x"], win_cfg["mini_y"] = x, y
+            cfgmod.save_config(self.cfg)
+        except Exception:
+            pass
+
+    # ================= 窗口拖动(受控拖拽) =================
+    def _win(self, which: str):
+        return {"overlay": self.overlay, "mini": self.mini}.get(which)
+
+    def drag_begin(self, which: str, sx: float, sy: float) -> bool:
+        win = self._win(which)
+        if win is None:
+            return False
+        try:
+            self._drag = {"which": which, "x": float(win.x), "y": float(win.y),
+                          "px": float(sx), "py": float(sy), "last": None}
+            return True
+        except Exception:
+            self._drag = None
+            return False
+
+    def drag_move(self, which: str, sx: float, sy: float) -> bool:
+        d = self._drag
+        win = self._win(which)
+        if not d or win is None or d.get("which") != which:
+            return False
+        x = int(round(d["x"] + float(sx) - d["px"]))
+        y = int(round(d["y"] + float(sy) - d["py"]))
+        if d.get("last") == (x, y):
+            return True
+        d["last"] = (x, y)
+        run_in_main(lambda: win.move(x, y))
+        return True
+
+    def drag_end(self, which: str) -> bool:
+        d = self._drag
+        self._drag = None
+        win = self._win(which)
+        if not d or win is None:
+            return False
+        try:
+            pos = d.get("last") or (int(win.x), int(win.y))
+            win_cfg = self.cfg.setdefault("window", {})
+            if which == "mini":
+                win_cfg["mini_x"], win_cfg["mini_y"] = int(pos[0]), int(pos[1])
+            else:
+                win_cfg["x"], win_cfg["y"] = int(pos[0]), int(pos[1])
+            cfgmod.save_config(self.cfg)
+        except Exception:
+            pass
+        return True
+
+    # ================= 洞口区域鼠标穿透 =================
+    def set_hole_region(self, rect: dict) -> bool:
+        """把 OCR 洞口从窗口区域中挖掉:洞内鼠标事件直达后方,同时保证洞口边框仍可见。"""
+        if not rect:
+            return False
+        try:
+            x, y = int(rect.get("x", 0)), int(rect.get("y", 0))
+            w, h = int(rect.get("w", 0)), int(rect.get("h", 0))
+        except Exception:
+            return False
+        key = (x, y, w, h)
+        if key == self._hole_key:
+            return True
+        self._hole_key = key
+        run_in_main(lambda: self._apply_region(x, y, w, h))
+        return True
+
+    def _apply_region(self, hx: int, hy: int, hw: int, hh: int):
+        win = self.overlay
+        try:
+            hwnd = int(win.native.winId())
+        except Exception:
+            return
+        if not hwnd:
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            gdi32 = ctypes.windll.gdi32
+            # 必须声明原型:64 位下句柄若按 int 传参会截断,导致区域创建失败
+            gdi32.CreateRectRgn.argtypes = [ctypes.c_int] * 4
+            gdi32.CreateRectRgn.restype = wintypes.HANDLE
+            gdi32.SetRectRgn.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_int,
+                                         ctypes.c_int, ctypes.c_int]
+            gdi32.SetRectRgn.restype = ctypes.c_int
+            gdi32.CombineRgn.argtypes = [wintypes.HANDLE, wintypes.HANDLE, wintypes.HANDLE, ctypes.c_int]
+            gdi32.CombineRgn.restype = ctypes.c_int
+            gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
+            gdi32.DeleteObject.restype = wintypes.BOOL
+            user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+            user32.GetClientRect.restype = wintypes.BOOL
+            user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HANDLE, wintypes.BOOL]
+            user32.SetWindowRgn.restype = ctypes.c_int
+            user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                            ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+
+            r = wintypes.RECT()
+            if not user32.GetClientRect(hwnd, ctypes.byref(r)):
+                return
+            cw, ch = int(r.right - r.left), int(r.bottom - r.top)
+            if cw < 8 or ch < 8:
+                return
+            left, top = max(0, hx), max(0, hy)
+            right, bottom = min(cw, hx + hw), min(ch, hy + hh)
+            if right - left < 4 or bottom - top < 4:
+                parts = [(0, 0, cw, ch)]
+            else:
+                parts = [
+                    (0, 0, cw, top),                       # 洞口上方
+                    (0, bottom, cw, ch - bottom),          # 洞口下方
+                    (0, top, left, bottom - top),          # 洞口左侧
+                    (right, top, cw - right, bottom - top),  # 洞口右侧
+                ]
+            parts = [p for p in parts if p[2] > 0 and p[3] > 0]
+            if not parts:
+                return
+
+            rgn = gdi32.CreateRectRgn(0, 0, 0, 0)
+            if not rgn:
+                return
+            px, py, pw, ph = parts[0]
+            gdi32.SetRectRgn(rgn, px, py, px + pw, py + ph)
+            if len(parts) > 1:
+                tmp = gdi32.CreateRectRgn(0, 0, 0, 0)
+                for px, py, pw, ph in parts[1:]:
+                    gdi32.SetRectRgn(tmp, px, py, px + pw, py + ph)
+                    gdi32.CombineRgn(rgn, rgn, tmp, 2)  # RGN_OR
+                gdi32.DeleteObject(tmp)
+
+            if not user32.SetWindowRgn(hwnd, rgn, True):
+                gdi32.DeleteObject(rgn)  # 失败时区域所有权仍在本地
+                return
+            # 让系统按新区域重算窗口框并重绘
+            user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0020 | 0x0002 | 0x0001 | 0x0004)
+            self._hole_active = True
+        except Exception:
+            pass
 
     # ================= 设置窗口 =================
     def open_settings(self):
@@ -141,7 +315,8 @@ class App:
         self.set_mode("snip")
 
     def cancel_snip(self):
-        back = "mini" if self.cfg.get("mode") == "mini" else "overlay"
+        back = self._prev_mode if self._prev_mode in ("mini", "overlay") else \
+            ("mini" if self.cfg.get("mode") == "mini" else "overlay")
         self.set_mode(back)
 
     def finish_snip(self, sel: dict, action: str = "run", question: str = ""):

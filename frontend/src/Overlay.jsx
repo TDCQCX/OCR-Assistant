@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
-import { Btn, Collapse, Pill, Segmented, useToast } from './ui'
+import { Btn, Collapse, Icon, IconBtn, Pill, Segmented, useToast, useWindowDrag } from './ui'
 
 const MODES = [
-  { value: 'overlay', label: '悬浮窗' },
-  { value: 'snip', label: '自由截图' },
-  { value: 'mini', label: '迷你条' },
+  { value: 'overlay', label: '悬浮窗', icon: 'overlay', tip: '悬浮窗模式(Ctrl+1)' },
+  { value: 'snip', label: '自由截图', icon: 'snip', tip: '自由截图模式(Ctrl+Shift+A)' },
+  { value: 'mini', label: '迷你条', icon: 'mini', tip: '迷你条模式(Ctrl+2)' },
 ]
 
 export default function Overlay() {
@@ -14,19 +14,47 @@ export default function Overlay() {
   const { cfg, status, result, busy } = app
   const toast = useToast()
   const holeRef = useRef(null)
+  const dragHeader = useWindowDrag('overlay')
   const [question, setQuestion] = useState(cfg.behavior?.default_question || '请给出该题目的答案')
   const [providers, setProviders] = useState([])
   const [active, setActive] = useState(cfg.active_provider)
   const [borderHidden, setBorderHidden] = useState(false)
   const [size, setSize] = useState({ w: cfg.window?.width || 640, h: cfg.window?.height || 680 })
+  const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)
 
   useEffect(() => { call('list_providers').then((p) => { setProviders(p.list || []); setActive(p.active) }) }, [])
 
-  // 后端事件:截图时隐藏洞口边框 / 快捷键触发识别
+  // 把洞口(OCR 区域)几何上报后端,用于把该区域从窗口"输入/绘制区域"中挖掉 → 鼠标可穿透
+  const reportRef = useRef(() => {})
+  useEffect(() => {
+    const el = holeRef.current
+    if (!el) return
+    const report = () => {
+      const r = el.getBoundingClientRect()
+      const cs = getComputedStyle(el)
+      const bw = parseFloat(cs.borderTopWidth) || 0
+      const dpr = window.devicePixelRatio || 1
+      call('set_hole_region', {
+        x: (r.x + bw) * dpr,
+        y: (r.y + bw) * dpr,
+        w: Math.max(0, r.width - 2 * bw) * dpr,
+        h: Math.max(0, r.height - 2 * bw) * dpr,
+      })
+    }
+    reportRef.current = report
+    report()
+    const ro = new ResizeObserver(report)
+    ro.observe(el)
+    window.addEventListener('resize', report)
+    return () => { ro.disconnect(); window.removeEventListener('resize', report) }
+  }, [])
+
+  // 后端事件:截图时隐藏洞口边框 / 快捷键触发识别 / 模式切换后重新上报洞口
   useEffect(() => {
     const onEvent = (e) => {
       const ev = e.detail
-      if (ev.type === 'hideBorder') setBorderHidden(!!ev.value)
+      if (ev.type === 'hideBorder') { setBorderHidden(!!ev.value); setTimeout(() => reportRef.current(), 60) }
+      if (ev.type === 'config') setTimeout(() => reportRef.current(), 80)
       if (ev.type === 'hotkeyCapture') run()
     }
     window.addEventListener('ocr-event', onEvent)
@@ -51,35 +79,41 @@ export default function Overlay() {
     app.setStatus({ text: s.key_ready ? '就绪 · Key 已配置' : '就绪 · Key 未配置', tone: s.key_ready ? 'idle' : 'warn' })
   }
 
+  const toggleTop = async () => {
+    const next = !topmost
+    setTopmost(next)
+    await call('set_topmost', next)
+    toast(next ? '已置顶' : '已取消置顶')
+  }
+
+  const copy = () => {
+    navigator.clipboard.writeText(result?.error ? '' : (result?.answer || ''))
+    toast('已复制回答')
+  }
+
   const modeTone = { idle: 'ok', working: 'warn', ok: 'ok', danger: 'danger' }[status.tone] || 'muted'
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* ================= 顶部:功能与设置区 ================= */}
-      <header
-        className="pywebview-drag-region shrink-0 px-3 py-2 flex items-center gap-2 border-b border-line"
-        style={{ background: 'var(--c-panel)' }}
-      >
-        <span className="font-bold px-3 py-1 rounded-card text-accentfg text-[15px] tracking-wide" style={{ background: 'var(--c-accent)' }}>
-          OCR 助手
-        </span>
-        <span className="hint hidden md:block">截图识别 · 智能答题</span>
+      {/* ================= 顶部:图标工具栏(可拖动) ================= */}
+      <header className="panel shrink-0 h-10 px-2 flex items-center gap-2 drag-handle" {...dragHeader}>
+        <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag" title="OCR 助手">O</span>
+        <Segmented size="sm" value="overlay" options={MODES.map((m) => ({ ...m, iconOnly: true }))}
+                   onChange={(m) => app.setMode(m)} />
         <span className="flex-1" />
-
-        <Segmented size="sm" value="overlay" options={MODES} onChange={(m) => app.setMode(m)} />
-
-        <select className="ctl !w-auto !py-1" value={active} onChange={(e) => switchProvider(e.target.value)}>
+        <select className="ctl !w-[110px] !h-7 !text-[12px] no-drag" value={active} title="当前 AI 平台"
+                onChange={(e) => switchProvider(e.target.value)}>
           {providers.map((p) => (
             <option key={p.id} value={p.id}>{p.name}{p.ready ? '' : '(未配置)'}</option>
           ))}
         </select>
-
-        <Btn title="设置" onClick={() => call('open_settings')}>设置</Btn>
-        <Btn title="退出" onClick={() => app.quit()}>退出</Btn>
+        <IconBtn icon="pin" tip={topmost ? '取消置顶' : '窗口置顶'} active={topmost} onClick={toggleTop} />
+        <IconBtn icon="settings" tip="设置" onClick={() => call('open_settings')} />
+        <IconBtn icon="power" tip="退出(Ctrl+Q)" danger onClick={() => app.quit()} />
       </header>
 
-      {/* ================= 中部:透明洞口(可透看后方) ================= */}
-      <div className="flex-1 min-h-0 p-0">
+      {/* ================= 中部:透明洞口(鼠标可穿透,可透看后方) ================= */}
+      <div className="flex-1 min-h-0">
         <div
           ref={holeRef}
           className="w-full h-full"
@@ -91,7 +125,7 @@ export default function Overlay() {
       </div>
 
       {/* ================= 底部:操作 + 结果 ================= */}
-      <footer className="shrink-0 border-t border-line px-3 py-2 space-y-2" style={{ background: 'var(--c-panel)' }}>
+      <footer className="panel shrink-0 border-t px-2.5 py-2 space-y-2">
         <div className="flex items-center gap-2">
           <input
             className="ctl flex-1"
@@ -99,15 +133,16 @@ export default function Overlay() {
             placeholder="提问/指令(留空则默认:请给出该题目的答案)"
             onChange={(e) => setQuestion(e.target.value)}
           />
-          <Btn primary disabled={busy} onClick={run}>{busy ? '处理中…' : '截图并识别'}</Btn>
-          <Btn onClick={() => app.startSnip()} title="全屏拖框选择区域,可设为悬浮窗区域">重新选区</Btn>
-          <Btn onClick={() => { navigator.clipboard.writeText(answerText(result)); toast('已复制') }}>复制</Btn>
-          <Btn onClick={() => app.setResult(null)}>清空</Btn>
-          <span className="hint">洞口</span>
-          <input type="number" className="ctl !w-16 text-right" value={size.w}
+          <Btn primary icon="scan" disabled={busy} onClick={run}>{busy ? '处理中' : '识别'}</Btn>
+          <IconBtn icon="snip" tip="重新框选区域(可设为悬浮窗区域)" onClick={() => app.startSnip()} />
+          <IconBtn icon="copy" tip="复制回答" onClick={copy} />
+          <IconBtn icon="trash" tip="清空结果" onClick={() => app.setResult(null)} />
+          <span className="w-px h-5 mx-0.5" style={{ background: 'var(--c-line)' }} />
+          <Icon name="grid" size={14} className="text-muted" />
+          <input type="number" className="ctl !w-14 text-right" value={size.w} title="洞口宽度"
                  onChange={(e) => setSize({ ...size, w: +e.target.value })} onBlur={() => resize(size.w, size.h)} />
-          <span className="hint">×</span>
-          <input type="number" className="ctl !w-16 text-right" value={size.h}
+          <span className="text-muted text-[12px]">×</span>
+          <input type="number" className="ctl !w-14 text-right" value={size.h} title="洞口高度"
                  onChange={(e) => setSize({ ...size, h: +e.target.value })} onBlur={() => resize(size.w, size.h)} />
         </div>
 
@@ -123,24 +158,26 @@ export default function Overlay() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3 max-h-[30vh] overflow-auto">
+        <div className="grid grid-cols-2 gap-2.5 max-h-[30vh] overflow-auto">
           <Collapse title="识别结果" badge={<span className="hint">{(result?.ocr_text || '').length} 字</span>}>
-            <pre className="whitespace-pre-wrap text-[12px] leading-relaxed bg-bg/60 border border-line rounded-ctl p-2 max-h-40 overflow-auto">
+            <pre className="whitespace-pre-wrap text-[12px] leading-relaxed inset p-2 max-h-40 overflow-auto">
               {result?.ocr_text || '—'}
             </pre>
           </Collapse>
           <Collapse title="回答">
-            <pre className="whitespace-pre-wrap text-[13px] leading-relaxed bg-bg/60 border border-line rounded-ctl p-2 max-h-40 overflow-auto">
-              {result?.error ? `❌ ${result.error}` : result?.answer || '—'}
-            </pre>
+            {result?.error ? (
+              <div className="inset p-2 flex items-start gap-2 text-[12.5px]" style={{ color: 'var(--c-danger)' }}>
+                <Icon name="alert" size={14} className="mt-0.5" />
+                <span>{result.error}</span>
+              </div>
+            ) : (
+              <pre className="whitespace-pre-wrap text-[13px] leading-relaxed inset p-2 max-h-40 overflow-auto">
+                {result?.answer || '—'}
+              </pre>
+            )}
           </Collapse>
         </div>
       </footer>
     </div>
   )
-}
-
-function answerText(result) {
-  if (!result) return ''
-  return result.error ? '' : result.answer || ''
 }

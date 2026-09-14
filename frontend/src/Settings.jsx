@@ -2,43 +2,45 @@ import React, { useEffect, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
 import { applyTheme, resolveTheme, PRESETS, COLOR_FIELDS } from './theme'
-import { Btn, Card, Collapse, ColorInput, Field, Pill, Segmented, Switch, useToast } from './ui'
+import { Btn, Card, ColorInput, Field, Icon, IconBtn, Segmented, Switch, useToast } from './ui'
 
 const NAV = [
-  { key: 'model', label: '模型设置', icon: '🤖' },
-  { key: 'general', label: '常规设置', icon: '⚙️' },
-  { key: 'appearance', label: '外观主题', icon: '🎨' },
-  { key: 'history', label: '识别历史', icon: '🕘' },
-  { key: 'about', label: '关于应用', icon: 'ℹ️' },
+  { key: 'model', label: '模型设置', icon: 'chip' },
+  { key: 'general', label: '常规设置', icon: 'sliders' },
+  { key: 'appearance', label: '外观主题', icon: 'palette' },
+  { key: 'history', label: '识别历史', icon: 'history' },
+  { key: 'about', label: '关于应用', icon: 'info' },
 ]
 
 export default function Settings() {
   const app = useApp()
   const [page, setPage] = useState('model')
   return (
-    <div className="h-full flex gap-3 p-3 bg-bg">
+    <div className="h-full flex gap-3 p-3" style={{ background: 'var(--c-bg)' }}>
       {/* 左侧导航 */}
-      <aside className="w-[150px] shrink-0 flex flex-col gap-1.5">
-        <div className="px-2 py-1.5 font-bold text-[15px]">OCR 助手</div>
+      <aside className="w-[168px] shrink-0 flex flex-col gap-1.5">
+        <div className="flex items-center gap-2 px-1.5 pb-2">
+          <span className="logo-o w-[26px] h-[26px] text-[12px]">O</span>
+          <div className="min-w-0">
+            <div className="font-semibold text-[14px] leading-tight">OCR 助手</div>
+            <div className="hint leading-tight">v{app.version}</div>
+          </div>
+        </div>
         {NAV.map((n) => {
           const active = page === n.key
           return (
             <button
               key={n.key}
               onClick={() => setPage(n.key)}
-              className="text-left px-3 py-2 rounded-ctl border font-medium transition-colors"
-              style={{
-                background: active ? 'color-mix(in srgb, var(--c-accent) 18%, transparent)' : 'transparent',
-                borderColor: active ? 'var(--c-accent)' : 'transparent',
-                color: active ? 'var(--c-accent)' : 'var(--c-fg)',
-              }}
+              className={`nav-item ${active ? 'nav-item-active' : ''}`}
             >
-              <span className="mr-1.5">{n.icon}</span>{n.label}
+              <Icon name={n.icon} size={16} />
+              <span>{n.label}</span>
             </button>
           )
         })}
         <span className="flex-1" />
-        <Btn primary onClick={() => call('close_settings')}>关闭并保存</Btn>
+        <Btn primary icon="check" onClick={() => call('close_settings')}>关闭并保存</Btn>
       </aside>
 
       {/* 右侧内容 */}
@@ -88,16 +90,26 @@ function ModelPage() {
 
   const doTest = async () => {
     setTest({ state: 'testing', ms: 0 })
-    const r = await call('test_connection', idx)
-    setTest({ state: r.ok ? 'ok' : 'fail', ms: r.ms })
-    if (!r.ok) toast(r.message || '连接失败', 'danger')
+    await call('test_connection', idx)
   }
 
+  // 连通性测试结果由后端异步推送(避免阻塞界面)
+  useEffect(() => {
+    const onEvent = (e) => {
+      const ev = e.detail
+      if (ev.type !== 'conn') return
+      setTest({ state: ev.ok ? 'ok' : 'fail', ms: ev.ms || 0 })
+      if (!ev.ok) toast(ev.message || '连接失败', 'danger')
+    }
+    window.addEventListener('ocr-event', onEvent)
+    return () => window.removeEventListener('ocr-event', onEvent)
+  }, [])
+
   const testStyle = {
-    idle: { bg: 'var(--c-ok)', text: '测试连通性' },
-    testing: { bg: 'var(--c-muted)', text: '测试中…' },
-    ok: { bg: 'var(--c-ok)', text: '连接成功' },
-    fail: { bg: 'var(--c-danger)', text: '测试失败' },
+    idle: { bg: 'var(--c-accent)', text: '测试连通性', icon: 'link' },
+    testing: { bg: 'var(--c-muted)', text: '测试中…', icon: 'refresh' },
+    ok: { bg: 'var(--c-ok)', text: '连接成功', icon: 'check' },
+    fail: { bg: 'var(--c-danger)', text: '测试失败', icon: 'alert' },
   }[test.state]
   const latencyColor = test.ms < 1500 ? 'var(--c-ok)' : test.ms < 3500 ? 'var(--c-warn)' : 'var(--c-danger)'
 
@@ -108,20 +120,20 @@ function ModelPage() {
   const Item = ({ p, i }) => (
     <div
       onClick={() => { setIdx(i); loadForm(i) }}
-      className="group flex items-center gap-2 px-2.5 py-2 rounded-ctl border cursor-pointer transition-colors"
+      className="group flex items-center gap-2 px-2 h-[34px] rounded-ctl border cursor-pointer transition-colors"
       style={{
-        background: idx === i ? 'color-mix(in srgb, var(--c-accent) 16%, transparent)' : 'var(--c-card)',
+        background: idx === i ? 'var(--c-accent-soft)' : 'var(--c-card)',
         borderColor: idx === i ? 'var(--c-accent)' : 'var(--c-line)',
-        borderStyle: ready(p) ? 'solid' : 'dashed',
-        opacity: ready(p) ? 1 : 0.6,
+        opacity: ready(p) ? 1 : 0.62,
       }}
     >
-      <span className="w-6 h-6 rounded-md grid place-items-center text-[11px] font-bold text-white shrink-0" style={{ background: p.color || '#8b94a7' }}>
+      <span className="w-5 h-5 rounded-md grid place-items-center text-[10px] font-bold shrink-0"
+            style={{ background: p.color || '#8b94a7', color: '#fff' }}>
         {p.name?.[0]}
       </span>
-      <span className="truncate flex-1">{p.name}</span>
+      <span className="truncate flex-1 text-[12.5px]">{p.name}</span>
       <button
-        className="opacity-0 group-hover:opacity-100 text-danger px-1 rounded hover:bg-danger/10"
+        className="opacity-0 group-hover:opacity-100 text-danger p-0.5 rounded hover:bg-danger/10 no-drag"
         title="删除平台"
         onClick={async (e) => {
           e.stopPropagation()
@@ -129,7 +141,7 @@ function ModelPage() {
           await call('provider_remove', i)
           toast('已删除'); reload(Math.max(0, i - 1))
         }}
-      >✕</button>
+      ><Icon name="close" size={13} /></button>
     </div>
   )
 
@@ -138,32 +150,40 @@ function ModelPage() {
   return (
     <div className="flex gap-3 h-full">
       {/* 平台管理 */}
-      <div className="w-[220px] shrink-0 flex flex-col gap-2">
-        <div className="font-bold">AI平台管理</div>
+      <div className="w-[212px] shrink-0 flex flex-col gap-2">
+        <div className="flex items-center gap-2 px-0.5">
+          <Icon name="chip" size={15} className="text-accent" />
+          <span className="font-semibold">AI 平台管理</span>
+        </div>
         <div className="flex-1 overflow-auto space-y-1.5 pr-1">
           {configured.length > 0 && <div className="hint px-1">已配置({configured.length})</div>}
           {configured.map((p) => <Item key={p.id} p={p} i={list.indexOf(p)} />)}
           {unconfigured.length > 0 && <div className="hint px-1 pt-1">未配置({unconfigured.length})</div>}
           {unconfigured.map((p) => <Item key={p.id} p={p} i={list.indexOf(p)} />)}
         </div>
-        <Btn onClick={async () => { await call('provider_add'); reload(list.length) }}>+ 自定义平台</Btn>
+        <Btn icon="plus" onClick={async () => { await call('provider_add'); reload(list.length) }}>自定义平台</Btn>
       </div>
 
       {/* 表单 */}
       <div className="flex-1 min-w-0 space-y-3 overflow-auto pr-1">
         <Card>
           <div className="flex items-center gap-3">
-            <span className="w-11 h-11 rounded-card grid place-items-center text-[18px] font-bold text-white" style={{ background: form.color }}>
+            <span className="w-10 h-10 rounded-card grid place-items-center text-[17px] font-bold shrink-0"
+                  style={{ background: form.color, color: '#fff' }}>
               {form.name?.[0]}
             </span>
-            <input className="ctl !w-[220px] font-bold text-[15px]" value={form.name} onChange={(e) => patch('name', e.target.value)} />
+            <input className="ctl !w-[200px] font-semibold" value={form.name} onChange={(e) => patch('name', e.target.value)} />
             <span className="flex-1" />
-            {test.state === 'ok' && <span style={{ color: latencyColor }} className="font-semibold">响应 {(test.ms / 1000).toFixed(1)}s</span>}
+            {test.state === 'ok' && <span style={{ color: latencyColor }} className="font-semibold text-[12.5px]">响应 {(test.ms / 1000).toFixed(1)}s</span>}
             <button
-              className="btn border-transparent text-white font-semibold"
-              style={{ background: testStyle.bg }}
+              className="btn border-transparent font-semibold"
+              style={{ background: testStyle.bg, color: '#fff' }}
+              disabled={test.state === 'testing'}
               onClick={doTest}
-            >{testStyle.text}</button>
+            >
+              <Icon name={testStyle.icon} size={15} />
+              {testStyle.text}
+            </button>
           </div>
         </Card>
 
@@ -177,9 +197,10 @@ function ModelPage() {
                 placeholder="在平台控制台申请"
                 onChange={(e) => patch('api_key', e.target.value)}
               />
-              <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted" onClick={() => setShowKey(!showKey)} title="显示/隐藏">
-                {showKey ? '🙈' : '👁'}
-              </button>
+              <span className="absolute right-1 top-1/2 -translate-y-1/2">
+                <IconBtn icon={showKey ? 'eyeOff' : 'eye'} tip={showKey ? '隐藏' : '显示'}
+                         size={15} onClick={() => setShowKey(!showKey)} />
+              </span>
             </div>
           </Field>
           <Field label="模型 ID">
@@ -205,7 +226,7 @@ function ModelPage() {
 
         <Card title="JSON 请求预览" desc="随字段实时生成,可直接编辑模板"
               right={<Btn onClick={async () => { setTpl(await call('get_template')); setTplOpen(true) }}>编辑模板</Btn>}>
-          <pre className="text-[12px] leading-relaxed bg-bg/60 border border-line rounded-ctl p-2 max-h-56 overflow-auto">{preview}</pre>
+          <pre className="text-[12px] leading-relaxed inset p-2 max-h-56 overflow-auto">{preview}</pre>
         </Card>
       </div>
 
@@ -244,7 +265,7 @@ function GeneralPage() {
 
   return (
     <div className="space-y-3">
-      <Card title="AI 设置">
+      <Card title="AI 设置" icon="chip">
         <div className="space-y-2">
           <Field label="是否启用云端OCR" hint="云端:用所选大模型识别(更准,耗token);本地:内置 RapidOCR(离线免费、轻量快速)">
             <Segmented
@@ -276,7 +297,7 @@ function GeneralPage() {
         </div>
       </Card>
 
-      <Card title="保存设置">
+      <Card title="保存设置" icon="folder">
         <div className="space-y-2">
           <Field label="应用缓存位置">
             <div className="flex gap-2">
@@ -297,7 +318,7 @@ function GeneralPage() {
         </div>
       </Card>
 
-      <Card title="行为与快捷键">
+      <Card title="行为与快捷键" icon="sliders">
         <div className="space-y-2">
           <Field label="默认提问">
             <input className="ctl" value={local.behavior?.default_question || ''}
@@ -314,7 +335,7 @@ function GeneralPage() {
         </div>
       </Card>
 
-      <Card title="提示词设置">
+      <Card title="提示词设置" icon="text">
         <div className="space-y-2">
           <div className="hint">回答提示词可用占位符:{'{question}'} {'{ocr_text}'} {'{qtype}'} {'{qtitle}'} {'{options}'}</div>
           <textarea className="ctl h-24 font-mono text-[12px]" value={local.prompts?.ocr || ''}
@@ -345,12 +366,12 @@ function AppearancePage() {
 
   const setUi = (patch) => {
     app.setUi(patch)
-    applyTheme(resolveTheme({ ...ui, ...patch }))
+    applyTheme(resolveTheme({ ...ui, ...patch }), { ...ui, ...patch })
   }
 
   const pickPreset = (key) => {
     setUi({ theme: key })
-    applyTheme(PRESETS[key])
+    applyTheme(PRESETS[key], ui)
     toast(`已切换主题:${PRESETS[key].name}`)
   }
 
@@ -367,7 +388,7 @@ function AppearancePage() {
 
   return (
     <div className="space-y-3">
-      <Card title="全局主题" desc="点击即可全局生效(所有窗口同步)">
+      <Card title="全局主题" icon="palette" desc="点击即可全局生效(所有窗口同步)">
         <div className="flex flex-wrap gap-2">
           {Object.entries(PRESETS).map(([key, t]) => (
             <button
@@ -395,7 +416,7 @@ function AppearancePage() {
         </div>
       </Card>
 
-      <Card title="自定义主题" desc="逐项调整配色,实时预览" right={<><Btn onClick={applyCustom}>应用</Btn>
+      <Card title="自定义主题" icon="grid" desc="逐项调整配色,实时预览" right={<><Btn onClick={applyCustom}>应用</Btn>
         <Btn className="ml-2" onClick={() => call('export_theme', JSON.stringify(draft))}>导出</Btn>
         <Btn className="ml-2" onClick={async () => { const t = await call('import_theme'); if (t) { try { const o = JSON.parse(t); setDraft(o); setUi({ theme: 'custom', customTheme: o }); toast('已导入') } catch { toast('文件格式错误', 'danger') } } }}>导入</Btn></>}>
         <div className="grid grid-cols-2 gap-2">
@@ -408,7 +429,7 @@ function AppearancePage() {
         </div>
       </Card>
 
-      <Card title="形态与细节">
+      <Card title="形态与细节" icon="sliders">
         <div className="space-y-2">
           <Field label="圆角大小">
             <div className="flex items-center gap-3">
@@ -435,12 +456,7 @@ function AppearancePage() {
           <Field label="面板不透明度">
             <div className="flex items-center gap-3">
               <input type="range" min="60" max="100" value={ui.panelOpacity ?? 96}
-                     onChange={(e) => {
-                       const v = +e.target.value
-                       setUi({ panelOpacity: v })
-                       document.documentElement.style.setProperty('--c-panel',
-                         `color-mix(in srgb, ${resolveTheme({ ...ui, theme: ui.theme }).colors.card} ${v}%, transparent)`)
-                     }} className="flex-1" />
+                     onChange={(e) => setUi({ panelOpacity: +e.target.value })} className="flex-1" />
               <span className="hint w-10 text-right">{ui.panelOpacity ?? 96}%</span>
             </div>
           </Field>
@@ -458,7 +474,7 @@ function HistoryPage() {
   const list = app.history || []
   return (
     <div className="space-y-3">
-      <Card title={`识别历史(${list.length})`} right={<Btn danger onClick={async () => { await call('history_clear'); app.setHistory([]); toast('已清空') }}>清空全部</Btn>}>
+      <Card title={`识别历史(${list.length})`} icon="history" right={<Btn danger onClick={async () => { await call('history_clear'); app.setHistory([]); toast('已清空') }}>清空全部</Btn>}>
         {list.length === 0 && <div className="hint">暂无记录</div>}
         <div className="space-y-2">
           {list.map((h, i) => (
@@ -501,7 +517,7 @@ function AboutPage() {
     <div className="space-y-3">
       <Card>
         <div className="flex items-center gap-4">
-          <span className="w-14 h-14 rounded-card grid place-items-center text-[22px] font-bold text-white" style={{ background: 'var(--c-accent)' }}>O</span>
+          <span className="logo-o w-[52px] h-[52px] text-[24px]">O</span>
           <div className="flex-1">
             <div className="text-[19px] font-bold">OCR 助手</div>
             <div className="hint">版本 v{app.version} · {about.features}</div>
@@ -510,7 +526,7 @@ function AboutPage() {
         </div>
       </Card>
 
-      <Card title="请求记录(最近 20 周)" right={<Btn onClick={() => call('request_log_days').then(setDays)}>刷新</Btn>}>
+      <Card title="请求记录(最近 20 周)" icon="grid" right={<Btn onClick={() => call('request_log_days').then(setDays)}>刷新</Btn>}>
         <div className="grid grid-flow-col grid-rows-7 gap-[3px]">
           {cells.map((c, i) => (
             <span key={i} className="w-[11px] h-[11px] rounded-[2px]" style={{ background: levelColors[Math.min(4, c)] }} title={`${c} 次请求`} />
@@ -518,7 +534,7 @@ function AboutPage() {
         </div>
       </Card>
 
-      <Card title="网站与社区">
+      <Card title="网站与社区" icon="link">
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <span className="w-[110px]">GitHub 仓库</span>
@@ -533,7 +549,7 @@ function AboutPage() {
         </div>
       </Card>
 
-      <Card title={`开源许可证:${about.license || 'MIT'}`}>
+      <Card title={`开源许可证:${about.license || 'MIT'}`} icon="info">
         <p className="hint">MIT License — 允许自由使用、修改与分发,需保留版权声明。</p>
       </Card>
     </div>

@@ -126,8 +126,12 @@ DEFAULT_CONFIG = {
         "always_on_top": True,
         "width": 640,                  # 启动时的窗口尺寸(拖动后自动记忆更新)
         "height": 680,
-        "miniWidth": 560,              # 迷你条尺寸
-        "miniHeight": 46,
+        "x": None,                     # 悬浮窗位置(拖动后自动记忆)
+        "y": None,
+        "miniWidth": 380,              # 迷你条尺寸(纯图标工具条)
+        "miniHeight": 40,
+        "mini_x": None,                # 迷你条位置;为空时首次进入自动居中于任务栏上方
+        "mini_y": None,
     },
     "capture": {
         "max_side": 2048,              # 发送前图片长边压缩上限(px)
@@ -155,7 +159,7 @@ DEFAULT_CONFIG = {
         "add_to_knowledge": False,               # 是否将 AI 回答自动添加到本地知识库
     },
     "app": {
-        "version": "2.0.0",
+        "version": "2.1.0",
         "github": "https://github.com/TDCQCX/OCR-Assistant",  # 关于页跳转地址
         "qq_group": "1108236960",
         "license": "MIT",

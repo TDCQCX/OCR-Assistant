@@ -2,21 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================ 主题变量(运行时由 theme.js 覆盖) ============================ */
 :root {
-  /* 默认(浅色)主题变量,运行时由 theme.js 覆盖 */
-  --c-bg: #f2f4f8;
-  --c-card: #ffffff;
-  --c-panel: rgba(255, 255, 255, 0.96);
-  --c-fg: #252b36;
-  --c-muted: #6e7686;
-  --c-line: #e3e7ef;
+  --c-bg: #eef1f6;          /* 页面底色 */
+  --c-panel: #e7ebf3;       /* 悬浮窗/迷你条面板底色(压暗于卡片,形成分区对比) */
+  --c-card: #ffffff;        /* 卡片 */
+  --c-sub: #f4f6fa;         /* 卡片内嵌区域/输入框 */
+  --c-hover: #eaeef6;       /* 悬停底色 */
+  --c-fg: #222834;
+  --c-muted: #6b7484;
+  --c-line: #dde3ec;
   --c-accent: #2f6fed;
   --c-accent-fg: #ffffff;
-  --c-ok: #3fb950;
-  --c-warn: #f5a623;
-  --c-danger: #f85149;
+  --c-accent-soft: rgba(47, 111, 237, 0.12);
+  --c-ok: #2fa84f;
+  --c-warn: #d98a13;
+  --c-danger: #e5484d;
+  --c-shadow: 0 6px 20px rgba(20, 28, 44, 0.12);
   --radius: 12px;
   --font-size: 13px;
+  --ctl-h: 30px;
 }
 
 html, body, #root { height: 100%; }
@@ -29,30 +34,131 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* pywebview 拖拽区域 */
-.pywebview-drag-region { -webkit-app-region: drag; user-select: none; }
-
 /* 细滚动条 */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--c-line); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--c-muted); }
 
-input, textarea, select, button { font-family: inherit; font-size: inherit; }
+input, textarea, select, button { font-family: inherit; font-size: inherit; color: inherit; }
 input:focus, textarea:focus, select:focus { outline: none; }
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
 @layer components {
-  .card { @apply bg-card border border-line rounded-card; }
+  /* ---------- 容器 ---------- */
+  .card {
+    @apply border border-line rounded-card;
+    background: var(--c-card);
+  }
+  .panel {
+    @apply border-b border-line;
+    background: var(--c-panel);
+  }
+  .inset {
+    @apply border border-line rounded-ctl;
+    background: var(--c-sub);
+  }
+  .card-icon {
+    @apply grid place-items-center rounded-ctl shrink-0;
+    width: 26px; height: 26px;
+    background: var(--c-accent-soft);
+    color: var(--c-accent);
+  }
+
+  /* ---------- 输入与按钮 ---------- */
   .ctl {
-    @apply bg-card border border-line rounded-ctl px-3 py-1.5 text-fg w-full
-           focus:border-accent transition-colors;
+    @apply border border-line rounded-ctl px-2.5 w-full transition-colors;
+    height: var(--ctl-h);
+    background: var(--c-sub);
   }
+  .ctl:hover { border-color: var(--c-muted); }
+  .ctl:focus { border-color: var(--c-accent); background: var(--c-card); }
+  textarea.ctl { height: auto; padding-top: 6px; padding-bottom: 6px; }
+
   .btn {
-    @apply border border-line rounded-ctl px-3.5 py-1.5 font-medium transition-colors
-           hover:border-accent bg-card;
+    @apply inline-flex items-center justify-center gap-1.5 border border-line rounded-ctl px-3 font-medium transition-colors shrink-0;
+    height: var(--ctl-h);
+    background: var(--c-sub);
   }
-  .btn-primary { @apply border-transparent text-accentfg font-semibold; background: var(--c-accent); }
-  .btn-primary:hover { filter: brightness(1.08); }
-  .chip { @apply px-2 py-0.5 rounded-full text-[11px] border border-line text-muted; }
+  .btn:hover { background: var(--c-hover); border-color: var(--c-muted); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary {
+    background: var(--c-accent);
+    border-color: var(--c-accent);
+    color: var(--c-accent-fg);
+  }
+  .btn-primary:hover { background: var(--c-accent); border-color: var(--c-accent); filter: brightness(1.08); }
+  .btn-danger { color: var(--c-danger); border-color: var(--c-line); }
+  .btn-danger:hover { background: var(--c-danger); border-color: var(--c-danger); color: #fff; }
+  .btn-ghost { background: transparent; border-color: transparent; }
+  .btn-ghost:hover { background: var(--c-hover); border-color: transparent; }
+
+  .icon-btn {
+    @apply grid place-items-center rounded-ctl border border-transparent transition-colors shrink-0;
+    width: var(--ctl-h); height: var(--ctl-h);
+    background: transparent;
+    color: var(--c-fg);
+  }
+  .icon-btn:hover { background: var(--c-hover); color: var(--c-accent); }
+  .icon-btn-active { background: var(--c-accent-soft); color: var(--c-accent); border-color: var(--c-accent); }
+  .icon-btn-primary { background: var(--c-accent); color: var(--c-accent-fg); }
+  .icon-btn-primary:hover { filter: brightness(1.08); color: var(--c-accent-fg); }
+
+  /* ---------- 分段控件 ---------- */
+  .seg {
+    @apply inline-flex items-center gap-0.5 p-0.5 rounded-ctl border border-line shrink-0;
+    background: var(--c-sub);
+  }
+  .seg-item {
+    @apply inline-flex items-center gap-1.5 rounded-ctl font-medium transition-colors;
+  }
+  .seg-item[data-active="0"] { color: var(--c-muted); }
+  .seg-item[data-active="0"]:hover { background: var(--c-hover); color: var(--c-fg); }
+  .seg-item[data-active="1"] {
+    background: var(--c-card);
+    color: var(--c-accent);
+    box-shadow: 0 1px 2px rgba(20, 28, 44, .12);
+  }
+
+  /* ---------- 小标签 ---------- */
+  .chip {
+    @apply px-2 py-0.5 rounded-full text-[11px] border border-line text-muted;
+    background: var(--c-sub);
+  }
+  .pill {
+    @apply inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full text-[11.5px] border border-line;
+    background: var(--c-sub);
+  }
   .hint { @apply text-muted text-[12px]; }
+  .logo-o {
+    @apply grid place-items-center font-bold rounded-full shrink-0 select-none;
+    background: var(--c-accent);
+    color: var(--c-accent-fg);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--c-accent) 55%, #fff 45%);
+  }
+  .toast {
+    @apply flex items-center gap-2 px-3 py-2 rounded-ctl border text-[12px];
+    background: var(--c-card);
+    border-color: var(--c-line);
+    box-shadow: var(--c-shadow);
+    animation: pop .14s ease-out;
+  }
+  .toast[data-tone="danger"] { color: var(--c-danger); border-color: var(--c-danger); }
+
+  /* ---------- 设置页左侧导航 ---------- */
+  .nav-item {
+    @apply flex items-center gap-2.5 text-left px-3 rounded-ctl border border-transparent font-medium transition-colors;
+    height: 34px;
+    color: var(--c-fg);
+  }
+  .nav-item:hover { background: var(--c-hover); }
+  .nav-item-active {
+    background: var(--c-accent-soft);
+    border-color: var(--c-accent);
+    color: var(--c-accent);
+  }
 }
+
+/* 拖拽光标 */
+.drag-handle { cursor: move; }

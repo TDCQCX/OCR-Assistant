@@ -82,9 +82,9 @@ export default function Snip() {
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <Btn primary onClick={() => confirm('run')}>识别</Btn>
-            <Btn onClick={() => confirm('region')}>设为悬浮窗区域</Btn>
-            <Btn onClick={() => call('cancel_snip')}>取消</Btn>
+            <Btn primary icon="scan" onClick={() => confirm('run')}>识别</Btn>
+            <Btn icon="overlay" onClick={() => confirm('region')}>设为悬浮窗区域</Btn>
+            <Btn icon="close" onClick={() => call('cancel_snip')}>取消</Btn>
           </div>
         </>
       )}
@@ -95,7 +95,7 @@ export default function Snip() {
           className="absolute left-1/2 -translate-x-1/2 top-8 px-4 py-2 rounded-card border shadow-xl text-center"
           style={{ background: 'var(--c-panel)', borderColor: 'var(--c-line)' }}
         >
-          <div className="font-bold">自由截图模式</div>
+          <div className="font-semibold">自由截图模式</div>
           <div className="hint mt-1">按住鼠标左键拖拽框选区域 · Enter 识别 · Esc 取消</div>
         </div>
       )}

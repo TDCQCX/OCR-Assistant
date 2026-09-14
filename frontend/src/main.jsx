@@ -43,8 +43,8 @@ function App() {
     return () => { delete window.__ocrEvent }
   }, [])
 
-  // 主题应用
-  useEffect(() => { if (cfg) applyTheme(resolveTheme(cfg.ui)) }, [cfg])
+  // 主题应用(带上 ui.panelOpacity 等附加项)
+  useEffect(() => { if (cfg) applyTheme(resolveTheme(cfg.ui), cfg.ui) }, [cfg])
 
   const api = useMemo(() => ({
     cfg, setCfg, status, setStatus, result, setResult, history, setHistory, busy, setBusy, version, view,
@@ -67,6 +67,9 @@ function App() {
     setMode(m) { call('set_mode', m) },
     startSnip() { call('start_snip') },
     quit() { call('quit_app') },
+    dragBegin(w, x, y) { call('drag_begin', w, x, y) },
+    dragMove(w, x, y) { call('drag_move', w, x, y) },
+    dragEnd(w) { call('drag_end', w) },
   }), [cfg, status, result, history, busy, version, view])
 
   if (!cfg) return <div className="h-full grid place-items-center text-muted">正在连接后端…</div>
