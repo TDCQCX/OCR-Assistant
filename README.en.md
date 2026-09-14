@@ -7,8 +7,8 @@
 ![Tailwind](https://img.shields.io/badge/Style-Tailwind%20CSS-38BDF8?logo=tailwindcss&logoColor=white)
 ![pywebview](https://img.shields.io/badge/Shell-pywebview%20%2B%20Qt-41CD52?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-yellow)
-![Version](https://img.shields.io/badge/Version-2.2.0-orange)
+![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey)
+![Version](https://img.shields.io/badge/Version-2.5.0-orange)
 
 > **OCR Assistant** — a desktop tool with three capture modes, cloud/local OCR and LLM-powered image-and-text Q&A.
 > The interface is built with **React 18 + Tailwind CSS**; the backend is Python (capture / OCR / model calls / configuration).
@@ -146,4 +146,14 @@ Configurable under **Settings → General Settings → Behavior & Hotkeys**.
 
 ## License
 
-Licensed under the [MIT License](LICENSE).
+Licensed under **[CC BY-NC 4.0](LICENSE) (Attribution-NonCommercial 4.0 International)**:
+
+- **Non-commercial only** — you may not sell, paywall, or embed this project in a commercial product;
+- **Attribution required** — any redistribution, mirror or derivative work must credit the original author
+  and link to [https://github.com/TDCQCX/OCR-Assistant](https://github.com/TDCQCX/OCR-Assistant),
+  and must keep this license text intact;
+- Personal, academic and other non-commercial use (including modification and redistribution) is welcome.
+
+> Note: CC BY-NC 4.0 is not an OSI-approved open-source license. The NLLB-200 models used by the
+> balanced/full on-device translation tiers are themselves CC BY-NC 4.0. Third-party components
+> (PySide6/Qt, RapidOCR, etc.) remain under their own licenses — see [LICENSE](LICENSE).

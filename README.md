@@ -7,8 +7,8 @@
 ![Tailwind](https://img.shields.io/badge/Style-Tailwind%20CSS-38BDF8?logo=tailwindcss&logoColor=white)
 ![pywebview](https://img.shields.io/badge/Shell-pywebview%20%2B%20Qt-41CD52?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-yellow)
-![Version](https://img.shields.io/badge/Version-2.2.0-orange)
+![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey)
+![Version](https://img.shields.io/badge/Version-2.5.0-orange)
 
 > **OCR 助手** — 三种截图模式 · 云端/本地双 OCR · 大模型图文答题的桌面工具。
 > 界面由 **React 18 + Tailwind CSS** 构建,后端为 Python(截图 / OCR / 模型调用 / 配置)。
@@ -146,7 +146,16 @@ npm run dev       # 浏览器热更新调试
 
 ## 许可证
 
-本项目基于 [MIT 许可证](LICENSE) 开源。
+本项目采用 **[CC BY-NC 4.0](LICENSE)(署名—非商业性使用 4.0 国际)** 许可:
+
+- **禁止商业使用**:不得用于出售、付费分发、商业产品集成或任何以营利为目的的场景;商业授权请联系作者;
+- **转载必须标明出处**:任何转载、镜像、二次分发或衍生作品,须标注原作者与项目名,并给出原始仓库地址
+  [https://github.com/TDCQCX/OCR-Assistant](https://github.com/TDCQCX/OCR-Assistant),且保留许可协议全文;
+- 个人学习、研究、教学等非商业用途可自由使用、修改与分发。
+
+> 说明:该协议不属于 OSI 认可的开源许可(OSI 要求不得限制使用领域)。另外,端侧翻译的
+> 均衡/全量档使用的 NLLB-200 模型本身即为 CC BY-NC 4.0(禁止商用),与本项目协议一致;
+> 其他第三方组件(PySide6/Qt、RapidOCR 等)仍按其各自许可执行,详见 [LICENSE](LICENSE)。
 
 ## 端侧(离线)翻译
 

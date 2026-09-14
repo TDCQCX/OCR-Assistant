@@ -1,21 +1,53 @@
-MIT License
-
+OCR 助手(OCR Assistant)
 Copyright (c) 2026 TDCQCX
+https://github.com/TDCQCX/OCR-Assistant
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+本作品采用 知识共享 署名-非商业性使用 4.0 国际许可协议(CC BY-NC 4.0)进行许可。
+许可协议全文:https://creativecommons.org/licenses/by-nc/4.0/legalcode.zh-Hans
+协议摘要(中文):https://creativecommons.org/licenses/by-nc/4.0/deed.zh-Hans
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+====================================================================
+中文附加条款(与上述协议同时生效,若与协议冲突以更严格者为准)
+====================================================================
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+一、允许的行为
+1. 你可以自由地复制、分发、修改、演绎本作品(包括源码与其构建产物);
+2. 你可以将本作品用于个人学习、研究、教学、测评等非商业目的;
+3. 你可以基于本作品开发衍生作品并分发,但必须遵守下列全部约束。
+
+二、必须遵守的约束
+1. 【禁止商业使用】不得将本作品或其衍生作品用于任何商业目的,包括但不限于:
+   - 出售、出租、付费分发,或作为付费产品或付费服务的一部分提供;
+   - 在商业组织内部用于经营性业务(评估与试用除外);
+   - 通过广告、订阅、打赏、引流带货等方式直接或间接获利;
+   - 将其集成进以营利为目的的产品或平台。
+   如需商业授权,请先联系作者取得书面许可。
+
+2. 【转载与分发必须标明出处】任何形式的转载、镜像、二次分发或衍生作品的发布,都必须:
+   - 明确标注原作者与项目名:OCR 助手(OCR Assistant);
+   - 提供原始项目地址:https://github.com/TDCQCX/OCR-Assistant
+   - 保留本许可协议全文,不得删除或修改版权声明与协议声明;
+   - 若修改过源码,须显著说明"本作品基于原项目修改",且不得暗示原作者为你的修改背书。
+
+3. 【不得附加额外限制】不得对本作品施加法律条款或技术措施,限制他人行使本协议允许的权利。
+
+三、免责声明
+本作品按"现状"提供,不提供任何形式的明示或默示担保,包括但不限于对适销性、特定用途适用性
+及不侵权的担保。因使用本作品产生的任何直接或间接损失,作者不承担责任。
+
+====================================================================
+第三方组件与模型许可(本项目包含或依赖,须一并遵守)
+====================================================================
+- PySide6 / Qt:           LGPLv3(动态链接使用;如需静态链接或商业分发请自行获取 Qt 商业许可)
+- pywebview:              BSD 3-Clause
+- mss / Pillow / keyboard: MIT 及 MIT-CMU
+- requests:               Apache License 2.0
+- RapidOCR / PaddleOCR 模型: Apache License 2.0
+- CTranslate2:            MIT
+- sentencepiece:          Apache License 2.0
+- transformers / torch:   Apache License 2.0 / BSD 3-Clause
+- Argos Translate 模型:   CC BY-SA 4.0(仅模型,按需下载,不随本项目分发)
+- NLLB-200 系列模型:      CC BY-NC 4.0(仅按需下载,不随本项目分发;其非商业限制与本协议一致)
+
+本项目的"非商业"限制仅约束本项目自身代码与文档;第三方组件仍按其各自许可执行,
+你需要在遵守本协议的同时遵守上述第三方许可(例如 LGPLv3 对 Qt 的要求)。
