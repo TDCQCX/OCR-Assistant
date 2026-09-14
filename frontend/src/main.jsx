@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import { call } from './bridge'
 import { applyTheme, resolveTheme, PRESETS } from './theme'
-import { ToastHost, useToast } from './ui'
+import { DownloadHost, ToastHost, useToast } from './ui'
 import Overlay from './Overlay'
 import MiniBar from './MiniBar'
 import Translate from './Translate'
@@ -78,10 +78,12 @@ function App() {
   return (
     <AppCtx.Provider value={api}>
       <ToastHost>
-        {view === 'settings' ? <Settings />
-          : view === 'mini' ? <MiniBar />
-            : view === 'translate' ? <Translate />
-              : <Overlay />}
+        <DownloadHost>
+          {view === 'settings' ? <Settings />
+            : view === 'mini' ? <MiniBar />
+              : view === 'translate' ? <Translate />
+                : <Overlay />}
+        </DownloadHost>
       </ToastHost>
     </AppCtx.Provider>
   )

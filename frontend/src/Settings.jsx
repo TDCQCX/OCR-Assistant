@@ -366,10 +366,12 @@ function TranslatePage() {
   const [local, setLocal] = useState(app.cfg)
   const [langs, setLangs] = useState([])
   const [status, setStatus] = useState(null)
+  const [models, setModels] = useState(null)
   useEffect(() => setLocal(app.cfg), [app.cfg])
   useEffect(() => {
     call('languages').then((r) => setLangs(r.list || []))
     call('translate_status').then(setStatus)
+    call('local_models_status').then(setModels)
   }, [])
   useEffect(() => {
     const onEvent = (e) => {
@@ -377,6 +379,11 @@ function TranslatePage() {
       if (ev.type === 'pack') {
         toast(ev.message, ev.ok ? 'ok' : 'danger')
         call('translate_status').then(setStatus)
+      }
+      if (ev.type === 'download' && ev.done) {
+        call('local_models_status').then(setModels)
+        if (ev.error) toast(ev.error, 'danger')
+        else if (ev.message) toast(ev.message)
       }
     }
     window.addEventListener('ocr-event', onEvent)
@@ -427,24 +434,38 @@ function TranslatePage() {
         </div>
       </Card>
 
-      <Card title="端侧模型状态" icon="cpu" right={<Btn icon="refresh" onClick={() => call('translate_status').then(setStatus)}>重新检测</Btn>}>
+      <Card title="端侧模型管理" icon="download"
+            desc="按需下载,不随应用分发;下载后可完全离线使用"
+            right={<Btn icon="refresh" onClick={() => call('local_models_status').then(setModels)}>刷新</Btn>}>
         <div className="space-y-2">
+          {[
+            ['ocr', 'OCR 识别模型', 'RapidOCR PP-OCRv4(检测/识别/方向)', '约 16 MB', models?.ocr],
+            ['runtime', '推理运行时', 'CTranslate2 + sentencepiece', '约 62 MB', models?.runtime],
+            ['mt', '翻译模型', models?.mt?.pair ? `当前语言对 ${models.mt.pair}` : '当前语言对', '约 79 MB', models?.mt],
+          ].map(([kind, name, desc, size, st]) => (
+            <div key={kind} className="inset px-3 py-2 flex items-center gap-2.5">
+              <span className="card-icon"><Icon name={st?.ready ? 'check' : 'download'} size={14} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">{name}</div>
+                <div className="hint truncate">{desc}{st?.size_mb ? ` · 已占用 ${st.size_mb}MB` : ''}</div>
+              </div>
+              <Pill tone={st?.ready ? 'ok' : 'warn'}>{st?.ready ? '已就绪' : '未下载'}</Pill>
+              {st?.ready ? (
+                <Btn danger onClick={async () => {
+                  toast(await call('remove_local_model', kind)); call('local_models_status').then(setModels)
+                }}>删除</Btn>
+              ) : (
+                <Btn primary icon="download" onClick={() => {
+                  call('download_local_model', kind); toast('已开始下载(进度见右下角)')
+                }}>{size}</Btn>
+              )}
+            </div>
+          ))}
           <div className="flex items-center gap-2 flex-wrap">
-            <Pill tone={status?.argos_installed ? 'ok' : 'warn'}>
-              {status?.argos_installed ? 'Argos 已安装' : '未安装 argostranslate'}
-            </Pill>
             <Pill tone={status?.ollama ? 'ok' : 'muted'}>{status?.ollama ? 'Ollama 可用' : 'Ollama 未检测到'}</Pill>
-            <Pill tone={status?.ready ? 'ok' : 'danger'}>{status?.ready ? '端侧翻译可用' : '端侧翻译不可用'}</Pill>
-          </div>
-          <div className="hint">
-            已安装语言包:{(status?.argos_pairs || []).join('、') || '无'}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Btn icon="download" onClick={() => {
-              call('install_translate_pack', tr.source_lang || '英语', tr.target_lang || '中文')
-              toast('已开始下载语言包(需联网)')
-            }}>下载当前语言包</Btn>
-            <span className="hint">端侧离线模型需执行 <code>pip install argostranslate</code>,源码运行可用</span>
+            <span className="hint">
+              端侧模型目录:{models?.root || 'models/'}(可在文件管理器中删除)
+            </span>
           </div>
         </div>
       </Card>

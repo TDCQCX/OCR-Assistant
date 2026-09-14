@@ -3,7 +3,7 @@ import { call } from './bridge'
 import { useApp } from './main'
 import {
   Btn, Collapse, EngineSwitch, Icon, IconBtn, IconSeg, Pill, QBox, ResizeHandles, Tip,
-  useSmallWindow, useToast, useWindowDrag,
+  useDownloader, useSmallWindow, useToast, useWindowDrag,
 } from './ui'
 
 const MODES = [
@@ -17,6 +17,7 @@ export default function Overlay() {
   const app = useApp()
   const { cfg, status, result, busy } = app
   const toast = useToast()
+  const dl = useDownloader()
   const holeRef = useRef(null)
   const dragHeader = useWindowDrag('overlay')
   const dragFooter = useWindowDrag('overlay')
@@ -130,6 +131,22 @@ export default function Overlay() {
   }
 
   const toggleOcr = async (cloud) => {
+    if (!cloud) {
+      const st = await call('local_models_status')
+      if (!st?.ocr?.ready) {
+        dl.ask('ocr', {
+          title: '端侧识别需要下载 OCR 模型',
+          detail: 'RapidOCR 检测/识别/方向模型(PP-OCRv4)',
+          size: '约 16 MB',
+          onDone: async () => {
+            await call('set_config_value', 'ocr.mode', 'local')
+            await app.reload()
+            toast('已切换为端侧识别(离线)')
+          },
+        })
+        return
+      }
+    }
     await call('set_config_value', 'ocr.mode', cloud ? 'cloud' : 'local')
     await app.reload()
     toast(cloud ? '识别:云端' : '识别:端侧(离线)')

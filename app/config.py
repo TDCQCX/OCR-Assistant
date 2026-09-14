@@ -209,11 +209,11 @@ DEFAULT_CONFIG = {
         "add_to_knowledge": False,               # 是否将 AI 回答自动添加到本地知识库
     },
     "app": {
-        "version": "2.2.0",
+        "version": "2.3.0",
         "github": "https://github.com/TDCQCX/OCR-Assistant",  # 关于页跳转地址
         "qq_group": "1108236960",
         "license": "MIT",
-        "features": "悬浮窗/翻译/框选/迷你条 · 端侧+云端双OCR/翻译 · 双语对照 · 多平台 · 全局主题",
+        "features": "悬浮窗/翻译/框选/迷你条 · 端侧模型按需下载 · 双语对照 · 多平台 · 全局主题",
     },
 }
 

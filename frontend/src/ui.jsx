@@ -305,6 +305,90 @@ export function ResizeHandles({ which, onStart }) {
   )
 }
 
+/* ============================ 端侧模型下载(提示 + 进度) ============================ */
+const DownloadCtx = createContext({ ask: () => {}, progress: null })
+export const useDownloader = () => useContext(DownloadCtx)
+
+export function DownloadHost({ children }) {
+  const [req, setReq] = useState(null)
+  const [prog, setProg] = useState(null)
+
+  useEffect(() => {
+    const on = (e) => {
+      const ev = e.detail
+      if (ev.type !== 'download') return
+      setProg(ev)
+      if (ev.done) {
+        if (!ev.error && req?.onDone) req.onDone()
+        setTimeout(() => setProg(null), ev.error ? 6000 : 3000)
+      }
+    }
+    window.addEventListener('ocr-event', on)
+    return () => window.removeEventListener('ocr-event', on)
+  }, [req])
+
+  const ask = (kind, opts = {}) => setReq({ kind, ...opts })
+  const start = () => {
+    const kind = req?.kind
+    setReq(null)
+    call('download_local_model', kind)
+  }
+
+  return (
+    <DownloadCtx.Provider value={{ ask, progress: prog }}>
+      {children}
+      {req && (
+        <div className="modal-mask" onClick={() => setReq(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2.5 mb-2.5">
+              <span className="card-icon"><Icon name="download" size={15} /></span>
+              <div className="min-w-0">
+                <div className="font-semibold">{req.title || '需要下载端侧模型'}</div>
+                <div className="hint mt-0.5">{req.note || '端侧模型不随应用分发,首次使用需联网下载一次'}</div>
+              </div>
+            </div>
+            <div className="inset px-3 py-2 text-[12.5px] space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-muted w-[70px] shrink-0">下载内容</span>
+                <span className="truncate">{req.detail || '端侧模型'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted w-[70px] shrink-0">体积</span>
+                <span>{req.size || '约 16-110 MB'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted w-[70px] shrink-0">保存位置</span>
+                <span className="truncate">models/ 目录(可在设置中删除)</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-3">
+              <span className="hint flex-1">下载完成后自动切换到端侧</span>
+              <Btn onClick={() => setReq(null)}>暂不</Btn>
+              <Btn primary icon="download" onClick={start}>立即下载</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+      {prog && (
+        <div className="progress-toast">
+          <div className="flex items-center gap-2">
+            <Icon name={prog.error ? 'alert' : prog.done ? 'check' : 'download'} size={14} />
+            <span className="truncate flex-1">
+              {prog.error || prog.message || prog.text || '正在下载端侧模型…'}
+            </span>
+            <span className="hint shrink-0">{prog.pct || 0}%</span>
+          </div>
+          <div className="progress-track">
+            <span className="progress-fill"
+                  style={{ width: `${prog.error ? 100 : prog.pct || 0}%`,
+                           background: prog.error ? 'var(--c-danger)' : undefined }} />
+          </div>
+        </div>
+      )}
+    </DownloadCtx.Provider>
+  )
+}
+
 /* ============================ 基础控件 ============================ */
 export function Card({ title, icon, desc, right, children, className = '' }) {
   return (

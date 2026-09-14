@@ -3,7 +3,7 @@ import { call } from './bridge'
 import { useApp } from './main'
 import {
   Btn, EngineSwitch, Icon, IconBtn, IconSeg, LangPair, Pill, QBox, ResizeHandles, Segmented,
-  Tip, useToast, useWindowDrag,
+  Tip, useDownloader, useToast, useWindowDrag,
 } from './ui'
 
 const MODES = [
@@ -24,6 +24,7 @@ export default function Translate() {
   const app = useApp()
   const { cfg, status, result, busy } = app
   const toast = useToast()
+  const dl = useDownloader()
   const drag = useWindowDrag('translate')
   const tr = cfg.translate || {}
   const [langs, setLangs] = useState([])
@@ -44,6 +45,39 @@ export default function Translate() {
   const setOcr = (cloud) => call('set_config_value', 'ocr.mode', cloud ? 'cloud' : 'local')
     .then(() => app.reload())
 
+  // 切到端侧翻译前检查运行时与语言模型,缺失则弹窗请求下载
+  const toggleTranslateEngine = async (cloud) => {
+    if (cloud) { await setTr({ mode: 'cloud' }); return }
+    const st = await call('local_models_status')
+    if (!st?.runtime?.ready) {
+      dl.ask('runtime', {
+        title: '端侧翻译需要下载推理运行时',
+        detail: 'CTranslate2 + sentencepiece(只需下载一次)',
+        size: '约 62 MB',
+        onDone: async () => {
+          const st2 = await call('local_models_status')
+          if (!st2?.mt?.ready) {
+            dl.ask('mt', { size: '约 79 MB', onDone: () => setTr({ mode: 'local' }) })
+          } else {
+            await setTr({ mode: 'local' })
+          }
+        },
+      })
+      return
+    }
+    if (!st?.mt?.ready) {
+      dl.ask('mt', {
+        title: '端侧翻译需要下载该语言模型',
+        detail: `端侧翻译模型 ${st?.mt?.pair || ''}(CTranslate2 int8 + 分词模型)`,
+        size: '约 79 MB',
+        note: '离线可用、不消耗 API 额度;换语言对需另下模型',
+        onDone: () => setTr({ mode: 'local' }),
+      })
+      return
+    }
+    await setTr({ mode: 'local' })
+  }
+
   const pairs = result?.pairs || []
   const cloud = (tr.mode || 'cloud') === 'cloud'
   const ocrCloud = (cfg.ocr?.mode || 'cloud') === 'cloud'
@@ -58,7 +92,7 @@ export default function Translate() {
         <IconSeg size="sm" value="translate" options={MODES} onChange={(m) => app.setMode(m)} />
         <span className="flex-1" />
         <EngineSwitch cloud={ocrCloud} onChange={setOcr} label="识别" tips={['云端', '本地']} />
-        <EngineSwitch cloud={cloud} onChange={(v) => setTr({ mode: v ? 'cloud' : 'local' })}
+        <EngineSwitch cloud={cloud} onChange={toggleTranslateEngine}
                       label="翻译" tips={['云端', '本地']} />
         <IconBtn icon="pin" tip={topmost ? '取消置顶' : '窗口置顶'} active={topmost}
                  onClick={async () => { const n = !topmost; setTopmost(n); await call('set_topmost', n) }} />

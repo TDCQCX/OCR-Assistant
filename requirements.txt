@@ -7,6 +7,7 @@ Pillow>=10.0
 keyboard>=0.13.5
 rapidocr_onnxruntime>=1.3
 
-# 端侧(离线)翻译为可选功能,体积较大,按需安装:
-#   pip install argostranslate   然后到「设置 → 翻译设置」下载语言包
-# 也可以改用本机 Ollama(无需此依赖)
+# 端侧(离线)翻译的运行时与模型不再需要 pip 安装:首次在界面切换到端侧时
+# 会自动从 PyPI 下载 ctranslate2 + sentencepiece 到 models/runtime,并下载语言模型。
+# 仅当希望源码环境使用 argostranslate 作为备用引擎时才需要:
+#   pip install argostranslate
