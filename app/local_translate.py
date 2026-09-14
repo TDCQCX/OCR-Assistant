@@ -13,6 +13,7 @@
 import importlib
 import importlib.util
 import json
+import re
 import threading
 
 import requests
@@ -302,7 +303,9 @@ def parse_translation_output(raw: str, segments: list) -> list:
     if txt.startswith("["):
         try:
             arr = json.loads(txt[txt.find("["):txt.rfind("]") + 1])
-            items = [str(v) for v in arr if v is not None and not is_prompt_leak(str(v))]
+            items = [str(v) for v in arr
+                     if v is not None and not is_prompt_leak(str(v))
+                     and not is_artifact_line(str(v))]
             if items:
                 return [{"src": segments[i] if i < len(segments) else "",
                          "dst": items[i].strip()} for i in range(len(items))]
@@ -326,6 +329,24 @@ def is_prompt_leak(text: str) -> bool:
     return any(mark in s for mark in _PROMPT_MARKS)
 
 
+# 纯分隔符行(模型有时把提示词里的分隔符一起抄回译文)
+_SEP_LINES = {"---", "--", "-", "===", "==", "***", "—", "——", "...", "···"}
+_NUM_RE = re.compile(r"\[?\d{1,3}[\].)]?")
+
+
+def is_artifact_line(text: str) -> bool:
+    """判断是否为分隔符/编号回显等非译文内容。"""
+    s = (text or "").strip()
+    if not s:
+        return False
+    if s in _SEP_LINES:
+        return True
+    if len(s) <= 6 and all(ch in "-—_=*·." for ch in s):
+        return True
+    return bool(_NUM_RE.fullmatch(s))
+
+
 def strip_prompt_leak(text: str) -> str:
-    """丢弃译文里混入的提示词行。"""
-    return "\n".join(line for line in _split_lines(text) if not is_prompt_leak(line)).strip()
+    """丢弃译文里混入的提示词行、分隔符行与编号行。"""
+    return "\n".join(line for line in _split_lines(text)
+                     if not is_prompt_leak(line) and not is_artifact_line(line)).strip()

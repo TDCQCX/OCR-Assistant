@@ -112,7 +112,7 @@ class PipelineWorker(threading.Thread):
                       .replace("{source_lang}", src_lang)
                       .replace("{target_lang}", dst_lang)
                       .replace("{count}", str(len(segments)))
-                      .replace("{ocr_text}", "\n---\n".join(segments))
+                      .replace("{ocr_text}", json.dumps(segments, ensure_ascii=False))
                       .replace("{question}", self._question))
             if (self._question or "").strip():
                 prompt += f"\n\n附加要求:{self._question.strip()}"
