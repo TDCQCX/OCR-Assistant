@@ -36,14 +36,19 @@ class App:
         self.cfg = cfgmod.load_config()
         self.overlay = None
         self.mini = None
+        self.translate = None
         self.settings = None
         self.snip = None
         self._worker = None
         self._lock = threading.Lock()
         self._api = None
         self._drag = None
+        self._resize = None
         self._hole_key = None
         self._prev_mode = None
+        self._translate_mode = False
+        self._auto_thread = None
+        self._auto_stop = threading.Event()
         # 前端事件统一由独立线程推送:evaluate_js 会阻塞等待 JS 结果,
         # 若在 Qt 主线程调用会死锁(界面无响应),因此必须走非 GUI 线程。
         self._push_q = queue.Queue(maxsize=128)
@@ -60,7 +65,7 @@ class App:
         while True:
             payload = self._push_q.get()
             js = f"window.__ocrEvent && window.__ocrEvent({json.dumps(payload, ensure_ascii=False)})"
-            for win in (self.overlay, self.mini, self.settings, self.snip):
+            for win in (self.overlay, self.mini, self.translate, self.settings, self.snip):
                 if win is None:
                     continue
                 try:
@@ -70,23 +75,32 @@ class App:
 
     def _create_windows(self):
         cfg = self.cfg
-        mini_mode = cfg.get("mode") == "mini"
+        mode = cfg.get("mode")
         w = int(cfg["window"].get("width", 640))
         h = int(cfg["window"].get("height", 680))
-        mw = int(cfg["window"].get("miniWidth", 560))
-        mh = int(cfg["window"].get("miniHeight", 46))
+        mw = int(cfg["window"].get("miniWidth", 420))
+        mh = int(cfg["window"].get("miniHeight", 78))
+        tw = int(cfg["window"].get("translateWidth", 760))
+        th = int(cfg["window"].get("translateHeight", 620))
         on_top = bool(cfg["window"].get("always_on_top", True))
         api = self.api
 
         self.overlay = webview.create_window(
             "OCR 助手", _url("overlay"), js_api=api, width=w, height=h,
             frameless=True, easy_drag=False, on_top=on_top, transparent=True,
-            hidden=mini_mode, text_select=True,
+            hidden=mode != "overlay", text_select=True,
         )
         self.mini = webview.create_window(
             "OCR 助手", _url("mini"), js_api=api, width=mw, height=mh,
             frameless=True, easy_drag=False, on_top=on_top, transparent=True,
-            hidden=not mini_mode,
+            hidden=mode != "mini",
+        )
+        tx, ty = cfg["window"].get("translate_x"), cfg["window"].get("translate_y")
+        self.translate = webview.create_window(
+            "OCR 助手 - 翻译", _url("translate"), js_api=api, width=tw, height=th,
+            frameless=True, easy_drag=False, on_top=on_top, transparent=True,
+            hidden=mode != "translate", text_select=True,
+            **({"x": int(tx), "y": int(ty)} if tx is not None and ty is not None else {}),
         )
         self.settings = webview.create_window(
             "设置 - OCR 助手", _url("settings"), js_api=api, width=1000, height=700,
@@ -100,6 +114,7 @@ class App:
         )
         self.overlay.events.closed += self.quit_app
         self.mini.events.closed += self.quit_app
+        self.translate.events.closed += self.quit_app
         self.settings.events.closed += self._on_settings_closed
         self.snip.events.closed += self._on_snip_closed
 
@@ -120,31 +135,51 @@ class App:
 
     # ================= 模式切换 =================
     def set_mode(self, mode: str):
-        if mode not in ("overlay", "snip", "mini"):
+        if mode not in ("overlay", "snip", "mini", "translate"):
             return
         if mode == self.cfg.get("mode") and mode != "snip":
             return
+        prev = self.cfg.get("mode") or "overlay"
 
         def do():
+            overlay, mini, translate, snip = self.overlay, self.mini, self.translate, self.snip
             if mode == "snip":
-                if self.cfg.get("mode") != "snip":
-                    self._prev_mode = self.cfg.get("mode") or "overlay"
-                self.overlay.hide()
-                self.mini.hide()
-                self.snip.show()
+                if prev != "snip":
+                    self._prev_mode = prev
+                overlay.hide()
+                mini.hide()
+                translate.hide()
+                snip.show()
             elif mode == "mini":
-                self.snip.hide()
-                self.overlay.hide()
-                self.mini.show()
+                snip.hide()
+                overlay.hide()
+                translate.hide()
+                mini.show()
                 self._place_mini_default()
+            elif mode == "translate":
+                snip.hide()
+                overlay.hide()
+                mini.hide()
+                translate.show()
+                self._place_translate_default()
             else:
-                self.snip.hide()
-                self.mini.hide()
-                self.overlay.show()
+                snip.hide()
+                mini.hide()
+                translate.hide()
+                overlay.show()
             self.cfg["mode"] = mode
             cfgmod.save_config(self.cfg)
 
         run_in_main(do)
+        if mode != "translate":
+            self._stop_auto_refresh()
+        # 翻译模式:窗口消失前先记录位置
+        if prev == "translate" and mode != "translate":
+            win_cfg = self.cfg.setdefault("window", {})
+            try:
+                win_cfg["translate_x"], win_cfg["translate_y"] = int(self.translate.x), int(self.translate.y)
+            except Exception:
+                pass
         self.push({"type": "config", "config": self.cfg})
 
     # ================= 迷你条默认位置(任务栏上方居中) =================
@@ -157,8 +192,8 @@ class App:
             from PySide6.QtGui import QGuiApplication
             screen = QGuiApplication.primaryScreen()
             g = screen.availableGeometry()  # 已排除任务栏,逻辑像素
-            w = int(win_cfg.get("miniWidth", 380))
-            h = int(win_cfg.get("miniHeight", 40))
+            w = int(win_cfg.get("miniWidth", 420))
+            h = int(win_cfg.get("miniHeight", 78))
             x = int(g.x() + (g.width() - w) / 2)
             y = int(g.y() + g.height() - h - 18)
             self.mini.move(x, y)
@@ -167,9 +202,27 @@ class App:
         except Exception:
             pass
 
+    # ================= 翻译窗口默认位置(工作区右侧居中) =================
+    def _place_translate_default(self):
+        win_cfg = self.cfg.setdefault("window", {})
+        if win_cfg.get("translate_x") is not None and win_cfg.get("translate_y") is not None:
+            return
+        try:
+            from PySide6.QtGui import QGuiApplication
+            g = QGuiApplication.primaryScreen().availableGeometry()
+            w = int(win_cfg.get("translateWidth", 760))
+            h = int(win_cfg.get("translateHeight", 620))
+            x = int(g.x() + (g.width() - w) / 2)
+            y = int(g.y() + max(12, (g.height() - h) / 2))
+            self.translate.move(x, y)
+            win_cfg["translate_x"], win_cfg["translate_y"] = x, y
+            cfgmod.save_config(self.cfg)
+        except Exception:
+            pass
+
     # ================= 窗口拖动(受控拖拽) =================
     def _win(self, which: str):
-        return {"overlay": self.overlay, "mini": self.mini}.get(which)
+        return {"overlay": self.overlay, "mini": self.mini, "translate": self.translate}.get(which)
 
     def drag_begin(self, which: str, sx: float, sy: float) -> bool:
         win = self._win(which)
@@ -207,6 +260,8 @@ class App:
             win_cfg = self.cfg.setdefault("window", {})
             if which == "mini":
                 win_cfg["mini_x"], win_cfg["mini_y"] = int(pos[0]), int(pos[1])
+            elif which == "translate":
+                win_cfg["translate_x"], win_cfg["translate_y"] = int(pos[0]), int(pos[1])
             else:
                 win_cfg["x"], win_cfg["y"] = int(pos[0]), int(pos[1])
             cfgmod.save_config(self.cfg)
@@ -224,11 +279,84 @@ class App:
             w, h = int(rect.get("w", 0)), int(rect.get("h", 0))
         except Exception:
             return False
+        # 同时记录窗口「非洞口」部分的高度(标题栏+底部面板),供"设为悬浮窗区域"换算窗口尺寸
+        try:
+            inner_h = int(rect.get("innerH") or 0)
+            if inner_h > h > 0:
+                self.cfg.setdefault("window", {})["chromeHeight"] = inner_h - h
+                self.cfg["window"]["holeWidth"] = w
+                self.cfg["window"]["holeHeight"] = h
+        except Exception:
+            pass
         key = (x, y, w, h)
         if key == self._hole_key:
             return True
         self._hole_key = key
         run_in_main(lambda: self._apply_region(x, y, w, h))
+        return True
+
+    # ================= 窗口缩放(拖拽边框) =================
+    def resize_begin(self, which: str, edge: str, sx: float, sy: float) -> bool:
+        win = self._win(which)
+        if win is None or not edge:
+            return False
+        try:
+            self._resize = {"which": which, "edge": str(edge), "x": float(win.x), "y": float(win.y),
+                            "w": float(win.width), "h": float(win.height),
+                            "px": float(sx), "py": float(sy), "last": None}
+            return True
+        except Exception:
+            self._resize = None
+            return False
+
+    def resize_move(self, which: str, sx: float, sy: float) -> bool:
+        d = self._resize
+        win = self._win(which)
+        if not d or win is None or d.get("which") != which:
+            return False
+        dx = float(sx) - d["px"]
+        dy = float(sy) - d["py"]
+        edge = d["edge"]
+        minw, minh = (360, 260) if which == "overlay" else (420, 340)
+        x, y, w, h = d["x"], d["y"], d["w"], d["h"]
+        if "e" in edge:
+            w = max(minw, w + dx)
+        if "s" in edge:
+            h = max(minh, h + dy)
+        if "w" in edge:
+            nw = max(minw, w - dx)
+            x += w - nw
+            w = nw
+        if "n" in edge:
+            nh = max(minh, h - dy)
+            y += h - nh
+            h = nh
+        key = (int(round(x)), int(round(y)), int(round(w)), int(round(h)))
+        if d.get("last") == key:
+            return True
+        d["last"] = key
+        run_in_main(lambda: (win.move(key[0], key[1]), win.resize(key[2], key[3])))
+        return True
+
+    def resize_end(self, which: str) -> bool:
+        d = self._resize
+        self._resize = None
+        win = self._win(which)
+        if not d or win is None:
+            return False
+        try:
+            pos = d.get("last") or (int(win.x), int(win.y), int(win.width), int(win.height))
+            win_cfg = self.cfg.setdefault("window", {})
+            if which == "translate":
+                win_cfg["translate_x"], win_cfg["translate_y"] = pos[0], pos[1]
+                win_cfg["translateWidth"], win_cfg["translateHeight"] = pos[2], pos[3]
+            else:
+                win_cfg["x"], win_cfg["y"] = pos[0], pos[1]
+                win_cfg["width"], win_cfg["height"] = pos[2], pos[3]
+            cfgmod.save_config(self.cfg)
+        except Exception:
+            pass
+        self.push({"type": "config", "config": self.cfg})
         return True
 
     def _apply_region(self, hx: int, hy: int, hw: int, hh: int):
@@ -315,12 +443,12 @@ class App:
         self.set_mode("snip")
 
     def cancel_snip(self):
-        back = self._prev_mode if self._prev_mode in ("mini", "overlay") else \
-            ("mini" if self.cfg.get("mode") == "mini" else "overlay")
+        back = self._prev_mode if self._prev_mode in ("mini", "overlay", "translate") else \
+            (self.cfg.get("mode") if self.cfg.get("mode") in ("mini", "translate") else "overlay")
         self.set_mode(back)
 
     def finish_snip(self, sel: dict, action: str = "run", question: str = ""):
-        """完成框选:隐藏遮罩 → 抓取区域 → 识别 或 设为悬浮窗区域。"""
+        """完成框选:隐藏遮罩 → 抓取区域 → 识别 / 翻译 / 设为悬浮窗区域。"""
         dpr = float(sel.get("dpr") or 1)
         vs = virtual_screen()
         left = int(vs["left"] + sel["x"] * dpr)
@@ -337,25 +465,108 @@ class App:
             png = None
 
         if action == "region":
-            self.cfg["window"]["width"] = max(360, w)
-            self.cfg["window"]["height"] = max(260, h)
+            win_cfg = self.cfg.setdefault("window", {})
+            win_cfg["holeWidth"] = max(160, w)
+            win_cfg["holeHeight"] = max(120, h)
             self.cfg["mode"] = "overlay"
             cfgmod.save_config(self.cfg)
+            self.push({"type": "status", "text": "已设为悬浮窗区域", "tone": "ok"})
+            # 窗口尺寸 = 洞口 + 标题栏/底部面板:由前端按实际渲染高度换算后调用 resize_main
+            self.push({"type": "config", "config": self.cfg, "applyHole": True})
 
             def do():
-                self.overlay.resize(max(360, w), max(260, h))
                 self.snip.hide()
                 self.mini.hide()
+                self.translate.hide()
                 self.overlay.show()
 
             run_in_main(do)
-            self.push({"type": "status", "text": "已设为悬浮窗区域", "tone": "ok"})
+            return
+
+        # 记住本次框选区域,供翻译模式反复捕获/自动刷新
+        self.cfg.setdefault("capture", {})["last_rect"] = {
+            "left": left, "top": top, "w": w, "h": h, "dpr": dpr,
+        }
+        cfgmod.save_config(self.cfg)
+
+        if action == "translate":
+            self._translate_mode = True
+            self.set_mode("translate")
+            if png:
+                self._run(png, question, task="translate")
             self.push({"type": "config", "config": self.cfg})
             return
 
         self.cancel_snip()
         if png:
             self._run(png, question)
+
+    # ================= 翻译模式 =================
+    def run_capture_last(self, question: str = ""):
+        """复用上次框选区域直接识别(迷你条快速识别);没有记录则进入框选。"""
+        rect = (self.cfg.get("capture") or {}).get("last_rect")
+        if not rect:
+            self.start_snip()
+            return
+        try:
+            png = grab_region(int(rect["left"]), int(rect["top"]), int(rect["w"]), int(rect["h"]))
+        except CaptureError as exc:
+            self.push({"type": "error", "text": str(exc)})
+            return
+        self._run(png, question)
+
+    def run_translate(self, question: str = ""):
+        """重新捕获上一次框选区域并翻译(翻译模式的主操作)。"""
+        rect = (self.cfg.get("capture") or {}).get("last_rect")
+        if not rect:
+            self.push({"type": "error", "text": "还没有捕获区域:请先点击「框选内容」选择要翻译的区域"})
+            return
+        self.push({"type": "status", "text": "正在捕获区域…", "tone": "working"})
+        try:
+            png = grab_region(int(rect["left"]), int(rect["top"]), int(rect["w"]), int(rect["h"]))
+        except CaptureError as exc:
+            self.push({"type": "error", "text": str(exc)})
+            return
+        self._translate_mode = True
+        self._run(png, question, task="translate")
+
+    def start_snip_translate(self):
+        self._prev_mode = "translate"
+        self.set_mode("snip")
+
+    # ---- 自动刷新(定时重新捕获并翻译,适合字幕/连续内容) ----
+    def set_auto_refresh(self, on: bool) -> bool:
+        self.cfg.setdefault("translate", {})["auto_refresh"] = bool(on)
+        cfgmod.save_config(self.cfg)
+        if on:
+            self._start_auto_refresh()
+        else:
+            self._stop_auto_refresh()
+        self.push({"type": "config", "config": self.cfg})
+        return True
+
+    def _start_auto_refresh(self):
+        if self._auto_thread and self._auto_thread.is_alive():
+            return
+        self._auto_stop.clear()
+
+        def loop():
+            while not self._auto_stop.wait(max(0.8, int(self.cfg.get("translate", {}).get(
+                    "auto_interval_ms", 2500)) / 1000.0)):
+                if self.cfg.get("mode") != "translate":
+                    break
+                if self._worker and self._worker.is_alive():
+                    continue
+                try:
+                    self.run_translate("")
+                except Exception:
+                    pass
+
+        self._auto_thread = threading.Thread(target=loop, daemon=True, name="auto-refresh")
+        self._auto_thread.start()
+
+    def _stop_auto_refresh(self):
+        self._auto_stop.set()
 
     # ================= 识别流程 =================
     def run_pipeline_rect(self, rect: dict, question: str = ""):
@@ -381,14 +592,22 @@ class App:
             self.push({"type": "hideBorder", "value": False})
         self._run(png, question)
 
-    def _run(self, png: bytes, question: str = ""):
+    def _run(self, png: bytes, question: str = "", task: str = "answer"):
         with self._lock:
             if self._worker and self._worker.is_alive():
                 return
             prov = cfgmod.active_provider(self.cfg)
-            if not (prov.get("api_key") or "").strip():
-                self.push({"type": "error", "text": "未配置 API Key:请在「设置 → 模型设置」填写"})
+            ocr_mode = self.cfg.get("ocr", {}).get("mode", "cloud")
+            tr_cfg = dict(self.cfg.get("translate") or {})
+            # 翻译模式下:OCR 与翻译都走端侧时,不需要 API Key(完全离线)
+            need_key = not (task == "translate" and ocr_mode == "local"
+                            and tr_cfg.get("mode", "cloud") == "local")
+            if need_key and not (prov.get("api_key") or "").strip():
+                self.push({"type": "error", "text": "未配置 API Key:请在「设置 → 模型设置」填写,"
+                                                   "或把 OCR/翻译都切换为端侧"})
                 return
+            tr_cfg["ollama_url"] = self._local_ollama_url()
+            tr_cfg["ollama_model"] = self._local_ollama_model()
             client = AgentClient(
                 prov.get("api_key", ""), prov.get("model", ""), prov.get("base_url", ""),
                 self.cfg.get("request_template", ""),
@@ -398,17 +617,32 @@ class App:
                 backoff=float(self.cfg["retry"].get("backoff", 0.8)),
                 enable_thinking=bool(prov.get("enable_thinking", False)),
             )
+            prompts = self.cfg.get("prompts", {})
             from app.worker import PipelineWorker
             self.push({"type": "busy", "value": True})
             self._worker = PipelineWorker(
-                client, png, self.cfg["prompts"]["ocr"], self.cfg["prompts"]["answer"],
+                client, png, prompts.get("ocr", ""),
+                prompts.get("translate" if task == "translate" else "answer", ""),
                 question, self.cfg.get("knowledge", []),
-                self.cfg.get("ocr", {}).get("mode", "cloud"),
+                ocr_mode,
                 on_status=lambda t, tone: self.push({"type": "status", "text": t, "tone": tone}),
                 on_result=self._on_result,
                 on_error=lambda t: self.push({"type": "error", "text": t}),
+                task=task, translate=tr_cfg,
             )
             self._worker.start()
+
+    def _local_ollama_url(self) -> str:
+        for p in self.cfg.get("providers", []):
+            if "ollama" in str(p.get("id", "")).lower() or "11434" in str(p.get("base_url", "")):
+                return p.get("base_url", "")
+        return ""
+
+    def _local_ollama_model(self) -> str:
+        for p in self.cfg.get("providers", []):
+            if "ollama" in str(p.get("id", "")).lower() or "11434" in str(p.get("base_url", "")):
+                return p.get("model", "")
+        return ""
 
     def _on_result(self, data: dict):
         self.push({"type": "result", "data": data})

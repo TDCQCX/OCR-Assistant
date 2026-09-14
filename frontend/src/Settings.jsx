@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
 import { applyTheme, resolveTheme, PRESETS, COLOR_FIELDS } from './theme'
-import { Btn, Card, ColorInput, Field, Icon, IconBtn, Segmented, Switch, useToast } from './ui'
+import { Btn, Card, ColorInput, Field, Icon, IconBtn, Pill, Segmented, Switch, useToast } from './ui'
 
 const NAV = [
   { key: 'model', label: '模型设置', icon: 'chip' },
   { key: 'general', label: '常规设置', icon: 'sliders' },
+  { key: 'translate', label: '翻译设置', icon: 'translate' },
   { key: 'appearance', label: '外观主题', icon: 'palette' },
   { key: 'history', label: '识别历史', icon: 'history' },
   { key: 'about', label: '关于应用', icon: 'info' },
@@ -47,6 +48,7 @@ export default function Settings() {
       <main className="flex-1 min-w-0 overflow-auto pr-1">
         {page === 'model' && <ModelPage />}
         {page === 'general' && <GeneralPage />}
+        {page === 'translate' && <TranslatePage />}
         {page === 'appearance' && <AppearancePage />}
         {page === 'history' && <HistoryPage />}
         {page === 'about' && <AboutPage />}
@@ -353,6 +355,150 @@ function GeneralPage() {
         <span className="flex-1" />
         <span className="hint self-center">所有修改自动保存</span>
       </div>
+    </div>
+  )
+}
+
+/* ======================= 翻译设置 ======================= */
+function TranslatePage() {
+  const app = useApp()
+  const toast = useToast()
+  const [local, setLocal] = useState(app.cfg)
+  const [langs, setLangs] = useState([])
+  const [status, setStatus] = useState(null)
+  useEffect(() => setLocal(app.cfg), [app.cfg])
+  useEffect(() => {
+    call('languages').then((r) => setLangs(r.list || []))
+    call('translate_status').then(setStatus)
+  }, [])
+  useEffect(() => {
+    const onEvent = (e) => {
+      const ev = e.detail
+      if (ev.type === 'pack') {
+        toast(ev.message, ev.ok ? 'ok' : 'danger')
+        call('translate_status').then(setStatus)
+      }
+    }
+    window.addEventListener('ocr-event', onEvent)
+    return () => window.removeEventListener('ocr-event', onEvent)
+  }, [])
+
+  const set = async (path, value) => {
+    await call('set_config_value', path, value)
+    await app.reload()
+  }
+  const tr = local.translate || {}
+
+  return (
+    <div className="space-y-3">
+      <Card title="翻译方式" icon="translate" desc="云端=当前 AI 平台;端侧=本机模型,离线可用">
+        <div className="space-y-2">
+          <Field label="翻译引擎" hint="开=云端大模型,关=端侧模型">
+            <Segmented value={tr.mode || 'cloud'}
+                       options={[{ value: 'cloud', label: '云端翻译', icon: 'cloud' },
+                                 { value: 'local', label: '端侧翻译', icon: 'cpu' }]}
+                       onChange={(v) => set('translate.mode', v)} />
+          </Field>
+          <Field label="端侧引擎" hint="自动:优先端侧离线模型,其次本机 Ollama">
+            <Segmented value={tr.engine || 'auto'}
+                       options={[{ value: 'auto', label: '自动' }, { value: 'argos', label: 'Argos 端侧模型' },
+                                 { value: 'ollama', label: 'Ollama' }]}
+                       onChange={(v) => set('translate.engine', v)} />
+          </Field>
+          <Field label="默认语言方向">
+            <div className="flex items-center gap-2">
+              <select className="ctl !w-[120px]" value={tr.source_lang || '自动检测'}
+                      onChange={(e) => set('translate.source_lang', e.target.value)}>
+                {langs.map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+              <span className="text-muted">到</span>
+              <select className="ctl !w-[120px]" value={tr.target_lang || '中文'}
+                      onChange={(e) => set('translate.target_lang', e.target.value)}>
+                {langs.filter((l) => l !== '自动检测').map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+          </Field>
+          <Field label="默认展示方式">
+            <Segmented value={tr.display || 'bilingual'}
+                       options={[{ value: 'bilingual', label: '双语对照' }, { value: 'translated', label: '仅译文' },
+                                 { value: 'source', label: '仅原文' }]}
+                       onChange={(v) => set('translate.display', v)} />
+          </Field>
+        </div>
+      </Card>
+
+      <Card title="端侧模型状态" icon="cpu" right={<Btn icon="refresh" onClick={() => call('translate_status').then(setStatus)}>重新检测</Btn>}>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Pill tone={status?.argos_installed ? 'ok' : 'warn'}>
+              {status?.argos_installed ? 'Argos 已安装' : '未安装 argostranslate'}
+            </Pill>
+            <Pill tone={status?.ollama ? 'ok' : 'muted'}>{status?.ollama ? 'Ollama 可用' : 'Ollama 未检测到'}</Pill>
+            <Pill tone={status?.ready ? 'ok' : 'danger'}>{status?.ready ? '端侧翻译可用' : '端侧翻译不可用'}</Pill>
+          </div>
+          <div className="hint">
+            已安装语言包:{(status?.argos_pairs || []).join('、') || '无'}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Btn icon="download" onClick={() => {
+              call('install_translate_pack', tr.source_lang || '英语', tr.target_lang || '中文')
+              toast('已开始下载语言包(需联网)')
+            }}>下载当前语言包</Btn>
+            <span className="hint">端侧离线模型需执行 <code>pip install argostranslate</code>,源码运行可用</span>
+          </div>
+        </div>
+      </Card>
+
+      <Card title="自动刷新" icon="refresh" desc="定时重新捕获同一区域并翻译,适合字幕/连续内容">
+        <div className="space-y-2">
+          <Field label="自动刷新">
+            <Switch checked={!!tr.auto_refresh} onChange={(v) => set('translate.auto_refresh', v)}
+                    label={tr.auto_refresh ? '已开启(翻译模式下生效)' : '已关闭'} />
+          </Field>
+          <Field label="刷新间隔">
+            <div className="flex items-center gap-2">
+              <input type="number" className="ctl !w-24 text-right" value={tr.auto_interval_ms ?? 2500}
+                     onChange={(e) => setLocal({ ...local, translate: { ...tr, auto_interval_ms: +e.target.value } })}
+                     onBlur={(e) => set('translate.auto_interval_ms', +e.target.value)} />
+              <span className="hint">毫秒</span>
+            </div>
+          </Field>
+        </div>
+      </Card>
+
+      <Card title="提问与提示词" icon="text" desc="示例提问用于主界面下拉;自输入内容会自动记住">
+        <div className="space-y-2">
+          <Field label="示例提问" hint="每行一条">
+            <textarea className="ctl h-28 text-[12px]" value={(local.behavior?.question_presets || []).join('\n')}
+                      onChange={(e) => setLocal({
+                        ...local,
+                        behavior: {
+                          ...local.behavior,
+                          question_presets: e.target.value.split('\n'),
+                        },
+                      })}
+                      onBlur={(e) => set('behavior.question_presets',
+                        e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} />
+          </Field>
+          <Field label="默认提问">
+            <input className="ctl" value={local.behavior?.default_question || ''}
+                   onChange={(e) => setLocal({ ...local, behavior: { ...local.behavior, default_question: e.target.value } })}
+                   onBlur={(e) => set('behavior.default_question', e.target.value)} />
+          </Field>
+          <Field label="已记住的提问" hint={`${(local.behavior?.question_history || []).length} 条(最多 20)`}
+                 width={150}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="hint truncate">{(local.behavior?.question_history || []).join(' / ') || '暂无'}</span>
+              <Btn onClick={() => set('behavior.question_history', [])}>清空</Btn>
+            </div>
+          </Field>
+          <Field label="翻译提示词" hint="占位符 {source_lang} / {target_lang} / {ocr_text}">
+            <textarea className="ctl h-40 font-mono text-[12px]" value={local.prompts?.translate || ''}
+                      onChange={(e) => setLocal({ ...local, prompts: { ...local.prompts, translate: e.target.value } })}
+                      onBlur={(e) => set('prompts.translate', e.target.value)} />
+          </Field>
+        </div>
+      </Card>
     </div>
   )
 }

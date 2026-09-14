@@ -8,20 +8,21 @@
 ![pywebview](https://img.shields.io/badge/Shell-pywebview%20%2B%20Qt-41CD52?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
-![Version](https://img.shields.io/badge/Version-2.1.0-orange)
+![Version](https://img.shields.io/badge/Version-2.2.0-orange)
 
 > **OCR Assistant** — a desktop tool with three capture modes, cloud/local OCR and LLM-powered image-and-text Q&A.
 > The interface is built with **React 18 + Tailwind CSS**; the backend is Python (capture / OCR / model calls / configuration).
 
 Align the capture area over anything on screen (questions, documents, web pages, code...), then with one click it completes **capture → text recognition → LLM understanding & answering**. Results are shown in collapsible sections — no window switching required.
 
-## Three Modes
+## Four Modes
 
 | Mode | Description | Hotkey |
 |---|---|---|
 | **Overlay window** | An always-on-top transparent hole that is the capture area; **clicks pass through the hole** to the content behind | `Ctrl+1` |
-| **Free snipping** | Full-screen translucent mask; drag to select any region, then **Recognize** or **Set as overlay area** | `Ctrl+Shift+A` / `Ctrl+3` |
-| **Mini bar** | Icon-only toolbar with hover hints; docked centered above the taskbar on first use and freely draggable | `Ctrl+2` |
+| **Free snipping** | Full-screen mask; drag to select a region. The action bar embeds engine switches, language pair and the question box: **Recognize / Translate this area / Set as overlay area** | `Ctrl+Shift+A` / `Ctrl+3` |
+| **Mini bar** | Icon toolbar plus a question input row; docked centered above the taskbar on first use and freely draggable | `Ctrl+2` |
+| **Translate** | A hole-free window with enlarged OCR/translation panes; sentence/paragraph bilingual view and offline on-device translation | top switcher |
 
 > Switch modes anytime from the top switcher or with hotkeys. `Ctrl+F1` triggers recognition in overlay mode and opens region selection in mini-bar mode.
 
@@ -29,7 +30,10 @@ Align the capture area over anything on screen (questions, documents, web pages,
 
 - **Transparent-hole overlay**: only the hole is see-through, the rest is an opaque panel; drag to reposition, adjust hole width/height, window size is remembered
 - **Click-through OCR region**: clicks inside the hole reach the content behind it, while the hole border stays visible
-- **Dual OCR modes**: **Cloud** (recognized by the selected LLM, higher accuracy) or **Local** (built-in RapidOCR, offline & free, ~50 MB, CPU 100–300 ms)
+- **Dual OCR modes**: **Cloud** (recognized by the selected LLM, higher accuracy) or **Local** (built-in RapidOCR, offline & free, ~50 MB, CPU 100–300 ms), switchable from the main UI
+- **Dual translation modes**: cloud LLM translation or offline on-device translation (Argos models, optionally local Ollama); the chosen language pair is injected into the request
+- **Bilingual view**: OCR text is split into sentences/paragraphs, each original block followed by its translation; switch between bilingual / translation-only / source-only
+- **Window edge resize**: drag any edge or corner to resize; size and position are remembered
 - **Multiple AI platforms**: Alibaba Bailian / OpenAI / DeepSeek / Zhipu GLM / Kimi / Ollama plus custom platforms; configured and unconfigured platforms are grouped separately with hover-to-delete and editable names
 - **Image-text Q&A**: both the OCR text and the screenshot are sent to the model, combined with structured question parsing (type / question / options); thinking mode can be disabled for speed
 - **Local knowledge base**: keyword hits return answers instantly without calling the API; AI answers can be auto-added
@@ -38,6 +42,7 @@ Align the capture area over anything on screen (questions, documents, web pages,
 - **Recognition history**: the last 100 results can be reviewed, copied or cleared
 - **Request history**: GitHub-style gray-to-green grid covering the last 20 weeks
 - **Editable JSON request template**: live preview with validation, fully customizable model parameters
+- **Question presets**: built-in examples (answer / translate / explain / summarize / find related info) with auto-saved custom input
 - **More settings**: image compression limit, default question, custom hotkeys, cache & question storage paths, auto-add answers, connection test with response time
 
 ## Architecture

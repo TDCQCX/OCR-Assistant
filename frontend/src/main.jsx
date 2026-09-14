@@ -6,6 +6,7 @@ import { applyTheme, resolveTheme, PRESETS } from './theme'
 import { ToastHost, useToast } from './ui'
 import Overlay from './Overlay'
 import MiniBar from './MiniBar'
+import Translate from './Translate'
 import Settings from './Settings'
 
 export const AppCtx = createContext(null)
@@ -77,7 +78,10 @@ function App() {
   return (
     <AppCtx.Provider value={api}>
       <ToastHost>
-        {view === 'settings' ? <Settings /> : view === 'mini' ? <MiniBar /> : <Overlay />}
+        {view === 'settings' ? <Settings />
+          : view === 'mini' ? <MiniBar />
+            : view === 'translate' ? <Translate />
+              : <Overlay />}
       </ToastHost>
     </AppCtx.Provider>
   )

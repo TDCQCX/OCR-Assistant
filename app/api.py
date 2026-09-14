@@ -249,6 +249,65 @@ class Api:
     def set_hole_region(self, rect: dict) -> bool:
         return self.app.set_hole_region(rect or {})
 
+    def resize_begin(self, which: str, edge: str, sx: float, sy: float) -> bool:
+        return self.app.resize_begin(which, edge, sx, sy)
+
+    def resize_move(self, which: str, sx: float, sy: float) -> bool:
+        return self.app.resize_move(which, sx, sy)
+
+    def resize_end(self, which: str) -> bool:
+        return self.app.resize_end(which)
+
+    # ================= 翻译模式 =================
+    def run_translate(self, question: str = "") -> bool:
+        threading.Thread(target=self.app.run_translate, args=(question or "",), daemon=True).start()
+        return True
+
+    def run_mini_capture(self, question: str = "") -> bool:
+        """迷你条快速识别:复用上次框选区域,没有则进入框选。"""
+        threading.Thread(target=self.app.run_capture_last, args=(question or "",), daemon=True).start()
+        return True
+
+    def snip_translate(self):
+        self.app.start_snip_translate()
+
+    def set_auto_refresh(self, on: bool) -> bool:
+        return self.app.set_auto_refresh(bool(on))
+
+    def languages(self) -> dict:
+        return {"list": list(cfgmod.LANGUAGES), "codes": dict(cfgmod.LANG_CODES)}
+
+    def translate_status(self) -> dict:
+        from app import local_translate
+        st = local_translate.status(self.app._local_ollama_url())  # noqa: SLF001
+        st["source_lang"] = self.app.cfg.get("translate", {}).get("source_lang")
+        st["target_lang"] = self.app.cfg.get("translate", {}).get("target_lang")
+        return st
+
+    def install_translate_pack(self, source_lang: str, target_lang: str) -> bool:
+        threading.Thread(target=self._install_pack, args=(source_lang, target_lang),
+                         daemon=True).start()
+        return True
+
+    def _install_pack(self, source_lang: str, target_lang: str):
+        from app import local_translate
+        self.app.push({"type": "status", "text": "正在下载端侧语言包…", "tone": "working"})
+        msg = local_translate.install_argos_pack(source_lang, target_lang)
+        ok = "安装完成" in msg or "已存在" in msg
+        self.app.push({"type": "pack", "ok": ok, "message": msg})
+        self.app.push({"type": "status", "text": msg, "tone": "ok" if ok else "danger"})
+
+    # ================= 提问记忆(自输入自动保存) =================
+    def remember_question(self, text: str) -> list:
+        text = (text or "").strip()
+        beh = self.app.cfg.setdefault("behavior", {})
+        hist = [q for q in (beh.get("question_history") or []) if q != text]
+        if text:
+            hist.insert(0, text)
+        beh["question_history"] = hist[:20]
+        cfgmod.save_config(self.app.cfg)
+        return beh["question_history"]
+
     def start_snip(self):
         self.app.start_snip()
 

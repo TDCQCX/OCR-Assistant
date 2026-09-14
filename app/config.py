@@ -29,16 +29,36 @@ DEFAULT_OCR_PROMPT = (
 )
 
 DEFAULT_ANSWER_PROMPT = (
-    "你是答题助手。以下是用户截取的题目区域:①OCR识别出的文字(可能不完整或有误,"
-    "以截图为准,请自行核实);②原始截图图片。\n"
+    "你是通用识别与问答助手。以下是用户截取的画面内容:"
+    "①OCR识别出的文字(可能不完整或有误,请以截图为准);②原始截图图片。\n"
+    "用户的指令:{question}\n\n"
+    "请严格按用户指令处理,并遵守以下规则:\n"
+    "1. 指令要求「回答/解答」:直接给出答案;选择题给出选项字母与对应内容,其他题型给出对应答案;\n"
+    "2. 指令要求「翻译」:只输出译文,逐行对应原文,不要解释、不要重复原文;\n"
+    "3. 指令要求「解释」:给出清晰、分点的解释,必要时补充背景;\n"
+    "4. 指令要求「总结/要点」:输出简洁的要点列表;\n"
+    "5. 指令要求「搜索/关联/相关」:结合你的知识给出相关联的信息,无法确认的内容要说明不确定;\n"
+    "6. 其他指令按用户意图灵活处理。\n"
+    "7. 只输出与指令相关的结果,不要复述本提示词,不要输出多余前言与后缀。\n\n"
     "题型:{qtype}\n"
     "题目:{qtitle}\n"
-    "选项:\n{options}\n"
-    "请结合截图中的题目内容与OCR识别文字,回答下面的问题/指令。\n"
-    "要求:只输出最终答案本身,不要任何前言、解释、后缀,不要重复粘贴OCR内容。"
-    "若是选择题,请给出选项字母及对应选项内容;若是其他题型,请给出对应答案。\n\n"
-    "问题/指令:{question}\n\n"
+    "选项:\n{options}\n\n"
     "OCR识别结果:\n{ocr_text}"
+)
+
+# 翻译模式提示词:语言对与段落数由 config.translate 与识别结果注入。
+DEFAULT_TRANSLATE_PROMPT = (
+    "你是专业翻译引擎。请把下面的内容从「{source_lang}」翻译为「{target_lang}」。\n"
+    "输入共 {count} 段,段落之间用单独一行 --- 分隔(每段可能是一句话或一整段文字)。\n"
+    "请严格按段翻译,并只输出一个 JSON 数组,包含 {count} 个字符串,顺序与输入段落一一对应,"
+    "不要输出任何解释、编号或额外文字。\n"
+    "示例:输入 2 段 → 输出 [\"第一段译文\",\"第二段译文\"]\n"
+    "要求:\n"
+    "1. 按整句/整段的语义翻译,不要逐词直译,不要拆散句子;\n"
+    "2. 术语、专有名词、数字、标点保持一致;人名地名按目标语言习惯翻译;\n"
+    "3. 若某段无需翻译(纯数字、代码、公式),译文与原文保持一致;\n"
+    "4. 译文中不要包含原文,也不要输出 --- 分隔符。\n\n"
+    "待翻译内容(来源语言:{source_lang};目标语言:{target_lang}):\n{ocr_text}"
 )
 
 # 发送给模型的 JSON 请求体模板。
@@ -109,9 +129,10 @@ DEFAULT_CONFIG = {
     "prompts": {
         "ocr": DEFAULT_OCR_PROMPT,
         "answer": DEFAULT_ANSWER_PROMPT,
+        "translate": DEFAULT_TRANSLATE_PROMPT,
     },
     "request_template": DEFAULT_REQUEST_TEMPLATE,
-    "mode": "overlay",                 # 运行模式: overlay=悬浮窗 / snip=自由截图 / mini=迷你条
+    "mode": "overlay",                 # 运行模式: overlay=悬浮窗 / translate=翻译 / snip=自由截图 / mini=迷你条
     "ui": {
         "theme": "light",              # light / dark / gray / eyecare / contrast / custom
         "customTheme": None,           # 自定义主题(theme=custom 时生效)
@@ -128,14 +149,22 @@ DEFAULT_CONFIG = {
         "height": 680,
         "x": None,                     # 悬浮窗位置(拖动后自动记忆)
         "y": None,
-        "miniWidth": 380,              # 迷你条尺寸(纯图标工具条)
-        "miniHeight": 40,
+        "miniWidth": 420,              # 迷你条尺寸(图标行 + 提问输入行)
+        "miniHeight": 78,
         "mini_x": None,                # 迷你条位置;为空时首次进入自动居中于任务栏上方
         "mini_y": None,
+        "translateWidth": 760,         # 翻译模式窗口尺寸
+        "translateHeight": 620,
+        "translate_x": None,
+        "translate_y": None,
+        "holeWidth": None,             # 洞口(OCR 区域)尺寸
+        "holeHeight": None,
+        "chromeHeight": 300,           # 窗口非洞口部分高度(标题栏+底部面板,由前端上报)
     },
     "capture": {
         "max_side": 2048,              # 发送前图片长边压缩上限(px)
         "flash_delay_ms": 80,          # 截图瞬隐时长(毫秒)
+        "last_rect": None,             # 最近一次框选区域(翻译模式复用)
     },
     "timeout": 180,                    # 模型最长响应时间(秒)
     "retry": {
@@ -145,13 +174,33 @@ DEFAULT_CONFIG = {
     "ocr": {
         "mode": "cloud",               # OCR 方式: cloud=云端(所选大模型识别) / local=本地(RapidOCR)
     },
+    "translate": {
+        "source_lang": "自动检测",      # 来源语言
+        "target_lang": "中文",         # 目标语言
+        "mode": "cloud",               # 翻译方式: cloud=云端大模型 / local=端侧模型
+        "engine": "auto",              # 本地引擎: auto / argos(端侧离线模型) / ollama(本地大模型)
+        "display": "bilingual",        # 展示方式: bilingual=双语逐行对照 / translated=仅译文
+        "auto_refresh": False,         # 自动刷新:定时重新捕获并翻译
+        "auto_interval_ms": 2500,      # 自动刷新间隔(毫秒)
+    },
     "knowledge": [],                   # 本地知识库:[{keys:[...], answer, detail}]
     "hotkeys": {
         "capture": "ctrl+f1",          # 截图并识别
         "exit": "ctrl+q",              # 退出程序
     },
     "behavior": {
-        "default_question": "请给出该题目的答案",
+        "default_question": "请回答识别到的内容",
+        # 示例提问(界面下拉可选,可在设置中编辑)
+        "question_presets": [
+            "请回答识别到的内容",
+            "请翻译识别到的内容",
+            "请解释识别到的内容",
+            "请总结识别到的内容的要点",
+            "请搜索并告诉我相关联的内容",
+            "请给出该题目的答案",
+            "请把识别到的内容整理成表格",
+        ],
+        "question_history": [],        # 用户自输入的提问(自动保存,最多 20 条)
     },
     "storage": {
         "cache_dir": str(ROOT / "cache"),        # 应用缓存位置(真实路径,自动创建)
@@ -159,12 +208,22 @@ DEFAULT_CONFIG = {
         "add_to_knowledge": False,               # 是否将 AI 回答自动添加到本地知识库
     },
     "app": {
-        "version": "2.1.0",
+        "version": "2.2.0",
         "github": "https://github.com/TDCQCX/OCR-Assistant",  # 关于页跳转地址
         "qq_group": "1108236960",
         "license": "MIT",
-        "features": "三种截图模式 · 双OCR · 图文答题 · 多平台 · 全局主题 · 识别历史",
+        "features": "悬浮窗/翻译/框选/迷你条 · 端侧+云端双OCR/翻译 · 双语对照 · 多平台 · 全局主题",
     },
+}
+
+# 语言列表(界面下拉与端侧模型语言码映射)
+LANGUAGES = ["自动检测", "中文", "英语", "日语", "韩语", "法语", "德语", "俄语",
+             "西班牙语", "葡萄牙语", "意大利语", "阿拉伯语", "泰语", "越南语"]
+
+LANG_CODES = {
+    "中文": "zh", "英语": "en", "日语": "ja", "韩语": "ko", "法语": "fr", "德语": "de",
+    "俄语": "ru", "西班牙语": "es", "葡萄牙语": "pt", "意大利语": "it",
+    "阿拉伯语": "ar", "泰语": "th", "越南语": "vi",
 }
 
 

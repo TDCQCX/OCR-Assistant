@@ -160,5 +160,164 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   }
 }
 
+/* ============================ 自绘悬浮提示(修复系统 title 黑底看不见文字) ============================ */
+.tip-wrap { position: relative; display: inline-flex; align-items: center; }
+.tip {
+  position: absolute;
+  z-index: 9998;
+  padding: 4px 8px;
+  border-radius: calc(var(--radius) * 0.55);
+  font-size: 11.5px;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity .12s ease, transform .12s ease;
+  background: var(--c-fg);
+  color: var(--c-card);
+  box-shadow: var(--c-shadow);
+}
+.tip-wrap:hover > .tip { opacity: 1; transform: translateY(0); }
+.tip-top { bottom: calc(100% + 6px); left: 50%; margin-left: -0px; transform: translate(-50%, 2px); }
+.tip-wrap:hover > .tip-top { transform: translate(-50%, 0); }
+.tip-bottom { top: calc(100% + 6px); left: 50%; transform: translate(-50%, -2px); }
+.tip-wrap:hover > .tip-bottom { transform: translate(-50%, 0); }
+.tip-right { left: calc(100% + 6px); top: 50%; transform: translate(-2px, -50%); }
+.tip-wrap:hover > .tip-right { transform: translate(0, -50%); }
+
+/* ============================ 模式切换:选中项展开文字 ============================ */
+.iconseg {
+  @apply inline-flex items-center gap-0.5 p-0.5 rounded-ctl border border-line shrink-0;
+  background: var(--c-sub);
+}
+.iconseg-item {
+  @apply inline-flex items-center gap-1.5 rounded-ctl font-medium transition-all whitespace-nowrap;
+  height: 100%;
+  padding: 0 7px;
+  color: var(--c-muted);
+  font-size: 12px;
+}
+.iconseg-item:hover { background: var(--c-hover); color: var(--c-fg); }
+.iconseg-item[data-active="1"] {
+  background: var(--c-card);
+  color: var(--c-accent);
+  padding: 0 10px;
+  box-shadow: 0 1px 2px rgba(20, 28, 44, .12);
+}
+.iconseg-label {
+  display: inline-block;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width .22s ease, opacity .18s ease;
+}
+.iconseg-item[data-active="1"] .iconseg-label { max-width: 90px; opacity: 1; }
+
+/* ============================ 云端 / 本地 引擎开关 ============================ */
+.engine-switch { @apply inline-flex items-center gap-1.5 shrink-0; }
+.engine-track {
+  @apply relative inline-flex items-center rounded-full border border-line transition-colors;
+  width: 74px;
+  height: 22px;
+  background: var(--c-sub);
+  padding: 0 6px;
+}
+.engine-track[data-cloud="1"] { background: var(--c-accent-soft); border-color: var(--c-accent); }
+.engine-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--c-muted);
+  transition: transform .18s ease, background .18s ease;
+}
+.engine-track[data-cloud="1"] .engine-knob { transform: translateX(52px); background: var(--c-accent); }
+.engine-text {
+  @apply w-full text-center text-[11px] font-medium select-none;
+  color: var(--c-muted);
+}
+.engine-track[data-cloud="1"] .engine-text { color: var(--c-accent); }
+.engine-label { @apply text-[11.5px] text-muted; }
+
+/* ============================ 语言方向 ============================ */
+.langpair { @apply inline-flex items-center gap-1 shrink-0; }
+.langpair-arrow {
+  @apply grid place-items-center rounded-ctl border border-line transition-colors;
+  width: 24px; height: 24px;
+  background: var(--c-sub);
+  color: var(--c-muted);
+}
+.langpair-arrow:hover { color: var(--c-accent); border-color: var(--c-accent); }
+
+/* ============================ 提问输入框 ============================ */
+.qbox { position: relative; display: flex; align-items: stretch; gap: 6px; width: 100%; }
+.qbox-input {
+  flex: 1;
+  height: auto;
+  min-height: 44px;
+  padding: 7px 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+.qbox-side { display: flex; align-items: center; gap: 4px; }
+.qbox-more {
+  @apply grid place-items-center rounded-ctl border border-line transition-colors shrink-0;
+  width: 26px; height: 26px;
+  background: var(--c-sub);
+  color: var(--c-muted);
+}
+.qbox-more:hover { color: var(--c-accent); border-color: var(--c-accent); }
+.qbox-menu {
+  position: absolute;
+  z-index: 200;
+  bottom: calc(100% + 6px);
+  right: 0;
+  min-width: 260px;
+  max-width: 380px;
+  padding: 6px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--radius);
+  background: var(--c-card);
+  box-shadow: var(--c-shadow);
+  animation: pop .14s ease-out;
+}
+.qbox-menu-title { @apply text-[11px] text-muted px-1.5 py-1; }
+.qbox-menu-item {
+  @apply flex items-center gap-2 w-full text-left px-2 rounded-ctl transition-colors text-[12.5px];
+  height: 28px;
+}
+.qbox-menu-item:hover { background: var(--c-hover); color: var(--c-accent); }
+
+/* ============================ 无边框窗口的边框缩放热区 ============================ */
+.rs { position: absolute; z-index: 60; }
+.rs-n { top: 0; left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.rs-s { bottom: 0; left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.rs-w { left: 0; top: 8px; bottom: 8px; width: 5px; cursor: ew-resize; }
+.rs-e { right: 0; top: 8px; bottom: 8px; width: 5px; cursor: ew-resize; }
+.rs-nw { top: 0; left: 0; width: 10px; height: 10px; cursor: nwse-resize; }
+.rs-ne { top: 0; right: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+.rs-sw { bottom: 0; left: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+.rs-se { bottom: 0; right: 0; width: 10px; height: 10px; cursor: nwse-resize; }
+
+/* ============================ 翻译模式 ============================ */
+.translate-pairs { @apply space-y-1.5; }
+.pair-row {
+  @apply grid gap-2 items-start;
+  grid-template-columns: 1fr;
+}
+.pair-line {
+  @apply px-2.5 py-1.5 rounded-ctl border border-line leading-relaxed;
+}
+.pair-src { background: var(--c-sub); color: var(--c-muted); font-size: 12px; }
+.pair-dst { background: color-mix(in srgb, var(--c-accent) 6%, var(--c-card)); font-size: 13.5px; }
+.mode-enter { animation: slidein .2s ease-out; }
+@keyframes slidein {
+  from { opacity: 0; transform: translateY(6px) scale(.995); }
+  to { opacity: 1; transform: none; }
+}
+
 /* 拖拽光标 */
 .drag-handle { cursor: move; }

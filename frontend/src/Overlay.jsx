@@ -1,12 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
-import { Btn, Collapse, Icon, IconBtn, Pill, Segmented, useToast, useWindowDrag } from './ui'
+import {
+  Btn, Collapse, EngineSwitch, Icon, IconBtn, IconSeg, Pill, QBox, ResizeHandles, Tip,
+  useToast, useWindowDrag,
+} from './ui'
 
 const MODES = [
-  { value: 'overlay', label: '悬浮窗', icon: 'overlay', tip: '悬浮窗模式(Ctrl+1)' },
-  { value: 'snip', label: '自由截图', icon: 'snip', tip: '自由截图模式(Ctrl+Shift+A)' },
-  { value: 'mini', label: '迷你条', icon: 'mini', tip: '迷你条模式(Ctrl+2)' },
+  { value: 'overlay', label: '悬浮窗', icon: 'overlay' },
+  { value: 'translate', label: '翻译', icon: 'translate' },
+  { value: 'snip', label: '框选', icon: 'snip' },
+  { value: 'mini', label: '迷你条', icon: 'mini' },
 ]
 
 export default function Overlay() {
@@ -16,7 +20,7 @@ export default function Overlay() {
   const holeRef = useRef(null)
   const dragHeader = useWindowDrag('overlay')
   const dragFooter = useWindowDrag('overlay')
-  const [question, setQuestion] = useState(cfg.behavior?.default_question || '请给出该题目的答案')
+  const [question, setQuestion] = useState(cfg.behavior?.default_question || '请回答识别到的内容')
   const [providers, setProviders] = useState([])
   const [active, setActive] = useState(cfg.active_provider)
   const [borderHidden, setBorderHidden] = useState(false)
@@ -27,20 +31,46 @@ export default function Overlay() {
 
   // 把洞口(OCR 区域)几何上报后端,用于把该区域从窗口"输入/绘制区域"中挖掉 → 鼠标可穿透
   const reportRef = useRef(() => {})
+  const chromeRef = useRef(cfg.window?.chromeHeight || 300)
+  const editingRef = useRef(false)
+  const wantHoleRef = useRef(null)   // 目标洞口尺寸(收敛式调整,抵消面板高度变化)
+  const triesRef = useRef(0)
   useEffect(() => {
     const el = holeRef.current
     if (!el) return
     const report = () => {
-      const r = el.getBoundingClientRect()
+      // 用 offset*(布局尺寸)而不是 getBoundingClientRect,避免切换动画的 transform 影响测量
+      const r = { x: el.offsetLeft, y: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight }
       const cs = getComputedStyle(el)
       const bw = parseFloat(cs.borderTopWidth) || 0
       const dpr = window.devicePixelRatio || 1
+      const chrome = Math.max(0, window.innerHeight - r.height)
+      if (chrome > 20) chromeRef.current = chrome
       call('set_hole_region', {
         x: (r.x + bw) * dpr,
         y: (r.y + bw) * dpr,
         w: Math.max(0, r.width - 2 * bw) * dpr,
         h: Math.max(0, r.height - 2 * bw) * dpr,
+        innerH: window.innerHeight * dpr,
+        innerW: window.innerWidth * dpr,
       })
+      // 目标洞口尺寸收敛:面板(尤其底部)高度会随内容换行变化,单次换算会偏小
+      const want = wantHoleRef.current
+      if (want) {
+        const off = Math.abs(r.width - want.w) > 3 || Math.abs(r.height - want.h) > 3
+        if (off && triesRef.current < 5) {
+          triesRef.current += 1
+          const need = Math.max(120, want.h + (window.innerHeight - r.height))
+          setTimeout(() => call('resize_main', want.w, need), 50)
+        } else {
+          wantHoleRef.current = null
+          triesRef.current = 0
+        }
+      } else if (!editingRef.current && r.width > 40 && r.height > 40) {
+        // 拖边缩放后同步洞口尺寸输入框
+        setSize((s) => (Math.abs(s.w - Math.round(r.width)) > 2 || Math.abs(s.h - Math.round(r.height)) > 2
+          ? { w: Math.round(r.width), h: Math.round(r.height) } : s))
+      }
     }
     reportRef.current = report
     report()
@@ -50,12 +80,23 @@ export default function Overlay() {
     return () => { ro.disconnect(); window.removeEventListener('resize', report) }
   }, [])
 
-  // 后端事件:截图时隐藏洞口边框 / 快捷键触发识别 / 模式切换后重新上报洞口
+  // 后端事件:截图时隐藏洞口边框 / 快捷键触发识别 / 模式切换后重新上报洞口 /
+  // "设为悬浮窗区域"按洞口尺寸换算窗口尺寸
   useEffect(() => {
     const onEvent = (e) => {
       const ev = e.detail
       if (ev.type === 'hideBorder') { setBorderHidden(!!ev.value); setTimeout(() => reportRef.current(), 60) }
-      if (ev.type === 'config') setTimeout(() => reportRef.current(), 80)
+      if (ev.type === 'config') {
+        setTimeout(() => reportRef.current(), 80)
+        const holeW = ev.config?.window?.holeWidth
+        const holeH = ev.config?.window?.holeHeight
+        if (ev.applyHole && holeW && holeH) {
+          setSize({ w: holeW, h: holeH })
+          wantHoleRef.current = { w: holeW, h: holeH }
+          triesRef.current = 0
+          setTimeout(() => reportRef.current(), 60)
+        }
+      }
       if (ev.type === 'hotkeyCapture') run()
     }
     window.addEventListener('ocr-event', onEvent)
@@ -67,9 +108,12 @@ export default function Overlay() {
     call('run_pipeline_rect', { x: r.x, y: r.y, w: r.width, h: r.height, dpr: window.devicePixelRatio }, question)
   }
 
+  // 输入框填报的是"洞口尺寸":窗口尺寸 = 洞口 + 标题栏/底部面板(并做收敛校正)
   const resize = async (w, h) => {
     setSize({ w, h })
-    await call('resize_main', w, h)
+    wantHoleRef.current = { w, h }
+    triesRef.current = 0
+    await call('resize_main', w, h + chromeRef.current)
   }
 
   const switchProvider = async (id) => {
@@ -87,6 +131,12 @@ export default function Overlay() {
     toast(next ? '已置顶' : '已取消置顶')
   }
 
+  const toggleOcr = async (cloud) => {
+    await call('set_config_value', 'ocr.mode', cloud ? 'cloud' : 'local')
+    await app.reload()
+    toast(cloud ? '识别:云端' : '识别:端侧(离线)')
+  }
+
   const copy = () => {
     navigator.clipboard.writeText(result?.error ? '' : (result?.answer || ''))
     toast('已复制回答')
@@ -95,14 +145,16 @@ export default function Overlay() {
   const modeTone = { idle: 'ok', working: 'warn', ok: 'ok', danger: 'danger' }[status.tone] || 'muted'
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden mode-enter relative">
+      <ResizeHandles which="overlay" onStart={() => { wantHoleRef.current = null }} />
       {/* ================= 顶部:图标工具栏(可拖动) ================= */}
       <header className="panel shrink-0 h-10 px-2 flex items-center gap-2 drag-handle" {...dragHeader}>
-        <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag" title="OCR 助手">O</span>
-        <Segmented size="sm" value="overlay" options={MODES.map((m) => ({ ...m, iconOnly: true }))}
-                   onChange={(m) => app.setMode(m)} />
+        <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag">O</span>
+        <IconSeg size="sm" value="overlay" options={MODES} onChange={(m) => app.setMode(m)} />
         <span className="flex-1" />
-        <select className="ctl !w-[110px] !h-7 !text-[12px] no-drag" value={active} title="当前 AI 平台"
+        <EngineSwitch cloud={(cfg.ocr?.mode || 'cloud') === 'cloud'} onChange={toggleOcr}
+                      label="识别" tips={['云端识别', '端侧识别']} />
+        <select className="ctl !w-[104px] !h-7 !text-[12px] no-drag" value={active}
                 onChange={(e) => switchProvider(e.target.value)}>
           {providers.map((p) => (
             <option key={p.id} value={p.id}>{p.name}{p.ready ? '' : '(未配置)'}</option>
@@ -127,24 +179,15 @@ export default function Overlay() {
 
       {/* ================= 底部:操作 + 结果 ================= */}
       <footer className="panel shrink-0 border-t px-2.5 py-2 space-y-2">
-        <div className="flex items-center gap-2">
-          <input
-            className="ctl flex-1"
-            value={question}
-            placeholder="提问/指令(留空则默认:请给出该题目的答案)"
-            onChange={(e) => setQuestion(e.target.value)}
-          />
-          <Btn primary icon="scan" disabled={busy} onClick={run}>{busy ? '处理中' : '识别'}</Btn>
-          <IconBtn icon="snip" tip="重新框选区域(可设为悬浮窗区域)" onClick={() => app.startSnip()} />
-          <IconBtn icon="copy" tip="复制回答" onClick={copy} />
-          <IconBtn icon="trash" tip="清空结果" onClick={() => app.setResult(null)} />
-          <span className="w-px h-5 mx-0.5" style={{ background: 'var(--c-line)' }} />
-          <Icon name="grid" size={14} className="text-muted" />
-          <input type="number" className="ctl !w-14 text-right" value={size.w} title="洞口宽度"
-                 onChange={(e) => setSize({ ...size, w: +e.target.value })} onBlur={() => resize(size.w, size.h)} />
-          <span className="text-muted text-[12px]">×</span>
-          <input type="number" className="ctl !w-14 text-right" value={size.h} title="洞口高度"
-                 onChange={(e) => setSize({ ...size, h: +e.target.value })} onBlur={() => resize(size.w, size.h)} />
+        <div className="flex items-start gap-2">
+          <QBox value={question} onChange={setQuestion} rows={2} className="flex-1 no-drag"
+                presets={cfg.behavior?.question_presets} history={cfg.behavior?.question_history} />
+          <div className="flex flex-col gap-1.5">
+            <Btn primary icon="scan" disabled={busy} onClick={run}>{busy ? '处理中' : '识别'}</Btn>
+            <Tip text="翻译模式(无洞口,结果区更大)">
+              <Btn icon="translate" onClick={() => app.setMode('translate')}>翻译</Btn>
+            </Tip>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap drag-handle" {...dragFooter}>
@@ -157,11 +200,25 @@ export default function Overlay() {
               <span className="chip">回答: {result.answer_time?.toFixed(1)}s</span>
             </>
           )}
+          <span className="flex-1" />
+          <IconBtn icon="snip" tip="重新框选区域(可设为悬浮窗区域)" onClick={() => app.startSnip()} />
+          <IconBtn icon="copy" tip="复制回答" onClick={copy} />
+          <IconBtn icon="trash" tip="清空结果" onClick={() => app.setResult(null)} />
+          <Icon name="grid" size={14} className="text-muted" />
+          <input type="number" className="ctl !w-14 text-right" value={size.w} title="洞口宽度"
+                 onFocus={() => { editingRef.current = true }}
+                 onChange={(e) => setSize({ ...size, w: +e.target.value })}
+                 onBlur={(e) => { editingRef.current = false; resize(+e.target.value, size.h) }} />
+          <span className="text-muted text-[12px]">×</span>
+          <input type="number" className="ctl !w-14 text-right" value={size.h} title="洞口高度"
+                 onFocus={() => { editingRef.current = true }}
+                 onChange={(e) => setSize({ ...size, h: +e.target.value })}
+                 onBlur={(e) => { editingRef.current = false; resize(size.w, +e.target.value) }} />
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5 max-h-[30vh] overflow-auto">
+        <div className="grid grid-cols-2 gap-2.5 max-h-[28vh] overflow-auto">
           <Collapse title="识别结果" badge={<span className="hint">{(result?.ocr_text || '').length} 字</span>}>
-            <pre className="whitespace-pre-wrap text-[12px] leading-relaxed inset p-2 max-h-40 overflow-auto">
+            <pre className="whitespace-pre-wrap text-[12px] leading-relaxed inset p-2 max-h-36 overflow-auto">
               {result?.ocr_text || '—'}
             </pre>
           </Collapse>
@@ -172,7 +229,7 @@ export default function Overlay() {
                 <span>{result.error}</span>
               </div>
             ) : (
-              <pre className="whitespace-pre-wrap text-[13px] leading-relaxed inset p-2 max-h-40 overflow-auto">
+              <pre className="whitespace-pre-wrap text-[13px] leading-relaxed inset p-2 max-h-36 overflow-auto">
                 {result?.answer || '—'}
               </pre>
             )}

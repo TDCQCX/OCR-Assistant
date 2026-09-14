@@ -1,17 +1,24 @@
 import React, { useEffect, useState } from 'react'
 import { call } from './bridge'
 import { applyTheme, resolveTheme } from './theme'
-import { Btn } from './ui'
+import { Btn, EngineSwitch, Icon, LangPair, QBox } from './ui'
 
-/** 自由截图模式:全屏遮罩 + 拖拽框选 → 识别 / 设为悬浮窗区域 */
+/** 自由截图模式:全屏遮罩 + 拖拽框选 → 识别 / 翻译 / 设为悬浮窗区域 */
 export default function Snip() {
   const [sel, setSel] = useState(null)
   const [start, setStart] = useState(null)
   const [dragging, setDragging] = useState(false)
   const [cfg, setCfg] = useState(null)
+  const [langs, setLangs] = useState([])
+  const [question, setQuestion] = useState('')
 
   useEffect(() => {
-    call('get_state').then((s) => { setCfg(s.config); applyTheme(resolveTheme(s.config.ui)) })
+    call('get_state').then((s) => {
+      setCfg(s.config)
+      setQuestion(s.config?.behavior?.default_question || '请回答识别到的内容')
+      applyTheme(resolveTheme(s.config.ui), s.config.ui)
+    })
+    call('languages').then((r) => setLangs(r.list || []))
   }, [])
 
   useEffect(() => {
@@ -41,7 +48,21 @@ export default function Snip() {
 
   const confirm = (action) => {
     if (!sel || sel.w < 8 || sel.h < 8) return
-    call('finish_snip', { x: sel.x, y: sel.y, w: sel.w, h: sel.h, dpr: window.devicePixelRatio, action })
+    call('finish_snip', { x: sel.x, y: sel.y, w: sel.w, h: sel.h, dpr: window.devicePixelRatio, action },
+         question)
+  }
+
+  const tr = cfg?.translate || {}
+  const setTr = async (patch) => {
+    const next = { ...tr, ...patch }
+    setCfg({ ...cfg, translate: next })
+    for (const [k, v] of Object.entries(patch)) {
+      await call('set_config_value', `translate.${k}`, v)  // eslint-disable-line no-await-in-loop
+    }
+  }
+  const toggleOcr = async (cloud) => {
+    await call('set_config_value', 'ocr.mode', cloud ? 'cloud' : 'local')
+    setCfg({ ...cfg, ocr: { ...(cfg.ocr || {}), mode: cloud ? 'cloud' : 'local' } })
   }
 
   const shade = 'rgba(0,0,0,0.45)'
@@ -72,19 +93,36 @@ export default function Snip() {
           >
             {Math.round(sel.w)} × {Math.round(sel.h)}
           </div>
-          {/* 操作条 */}
+          {/* 操作条:识别 / 翻译 / 设为悬浮窗区域,并内嵌引擎开关与提问输入 */}
           <div
-            className="absolute flex items-center gap-2 px-3 py-2 rounded-card border shadow-xl"
+            className="absolute rounded-card border shadow-xl p-2.5 space-y-2"
             style={{
-              left: Math.min(sel.x, window.innerWidth - 330),
-              top: Math.min(sel.y + sel.h + 8, window.innerHeight - 60),
+              left: Math.max(8, Math.min(sel.x, window.innerWidth - 560)),
+              top: Math.min(sel.y + sel.h + 8, window.innerHeight - 170),
+              width: 540,
               background: 'var(--c-panel)', borderColor: 'var(--c-line)',
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <Btn primary icon="scan" onClick={() => confirm('run')}>识别</Btn>
-            <Btn icon="overlay" onClick={() => confirm('region')}>设为悬浮窗区域</Btn>
-            <Btn icon="close" onClick={() => call('cancel_snip')}>取消</Btn>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Btn primary icon="scan" onClick={() => confirm('run')}>识别</Btn>
+              <Btn icon="translate" onClick={() => confirm('translate')}>翻译此区域</Btn>
+              <Btn icon="overlay" onClick={() => confirm('region')}>设为悬浮窗区域</Btn>
+              <span className="flex-1" />
+              <Btn icon="close" onClick={() => call('cancel_snip')}>取消</Btn>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <EngineSwitch cloud={(cfg?.ocr?.mode || 'cloud') === 'cloud'} onChange={toggleOcr}
+                            label="识别" tips={['云端识别', '端侧识别']} />
+              <EngineSwitch cloud={(tr.mode || 'cloud') === 'cloud'} onChange={(v) => setTr({ mode: v ? 'cloud' : 'local' })}
+                            label="翻译" tips={['云端翻译', '端侧翻译']} />
+              <span className="flex-1" />
+              <LangPair languages={langs} source={tr.source_lang || '自动检测'} target={tr.target_lang || '中文'}
+                        onChange={(s, t) => setTr({ source_lang: s, target_lang: t })} />
+            </div>
+            <QBox value={question} onChange={setQuestion} rows={2}
+                  presets={cfg?.behavior?.question_presets} history={cfg?.behavior?.question_history}
+                  placeholder="提问/指令(Enter 识别;留空则默认指令)" />
           </div>
         </>
       )}
@@ -95,8 +133,11 @@ export default function Snip() {
           className="absolute left-1/2 -translate-x-1/2 top-8 px-4 py-2 rounded-card border shadow-xl text-center"
           style={{ background: 'var(--c-panel)', borderColor: 'var(--c-line)' }}
         >
-          <div className="font-semibold">自由截图模式</div>
-          <div className="hint mt-1">按住鼠标左键拖拽框选区域 · Enter 识别 · Esc 取消</div>
+          <div className="flex items-center justify-center gap-2 font-semibold">
+            <Icon name="snip" size={15} />
+            自由截图模式
+          </div>
+          <div className="hint mt-1">按住鼠标左键拖拽框选区域 · 松开后可识别 / 翻译 / 设为悬浮窗区域 · Esc 取消</div>
         </div>
       )}
     </div>
