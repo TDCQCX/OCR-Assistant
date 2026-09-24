@@ -97,15 +97,15 @@ banner:
 
 [图片说明:此位置为 GitHub Releases 页面,操作为点击仓库主页右侧 "Releases" 进入发布列表]
 
-3. 在最新版本的 Assets 中找到 `OCR助手-v2.4.0.exe`,点击下载。
+3. 在最新版本的 Assets 中找到 `OCR助手-v2.6.3.exe`,点击下载。
 
-[图片说明:此位置为 Release 的 Assets 列表,操作为点击 "OCR助手-v2.4.0.exe" 下载]
+[图片说明:此位置为 Release 的 Assets 列表,操作为点击 "OCR助手-v2.6.3.exe" 下载]
 
 ### 4.2 运行安装包
 
 下载完成后,双击 exe 即可运行(单文件、免安装、绿色运行):
 
-[图片说明:此位置为 Windows 文件资源管理器中的 exe 图标,操作为双击 OCR助手-v2.4.0.exe]
+[图片说明:此位置为 Windows 文件资源管理器中的 exe 图标,操作为双击 OCR助手-v2.6.3.exe]
 
 - 若弹出 **SmartScreen(Windows 已保护你的电脑)**,点击"更多信息 → 仍要运行"即可。这是因为软件暂无代码签名,属正常提示。
 

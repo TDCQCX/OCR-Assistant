@@ -53,6 +53,10 @@ class App:
         self._guide_mode = ""
         self._guide_mini_backup = 0
         self._guide_pending = ""
+        self._hole_paused = False
+        self._tray = None
+        self._tray_menu = None
+        self._in_tray = False
         # 前端事件统一由独立线程推送:evaluate_js 会阻塞等待 JS 结果,
         # 若在 Qt 主线程调用会死锁(界面无响应),因此必须走非 GUI 线程。
         self._push_q = queue.Queue(maxsize=128)
@@ -68,7 +72,9 @@ class App:
         # 磁盘缓存/LevelDB 目录,导致除第一个之外所有窗口的页面都加载不出来
         # (表现为全屏空白、启动极慢)。本程序的设置都存在 config.json,不依赖
         # 浏览器级别的 cookie/localStorage,因此用无痕配置是安全的。
-        webview.start(self._bootstrap, gui="qt", debug=False, private_mode=True)
+        # icon:窗口标题栏与任务栏图标,和 exe 图标同源(assets/app.ico)
+        icon = str(cfgmod.ICON_PATH) if cfgmod.ICON_PATH.exists() else None
+        webview.start(self._bootstrap, gui="qt", debug=False, private_mode=True, icon=icon)
 
     def _bootstrap(self):
         """启动后校正窗口可见性,并按模式摆好位置。"""
@@ -116,6 +122,61 @@ class App:
     def _on_window_loaded(self):
         """窗口内容加载完成后再次校正可见性(避免被后创建的窗口盖过)。"""
         self._sync_visibility()
+
+    def _mode_closing(self, which: str) -> bool:
+        """窗口即将关闭(Alt+F4/关闭按钮):按退出策略处理,返回 True 表示允许关闭。
+
+        当前模式的窗口才需要拦;隐藏的其它模式窗口被关掉不影响运行。
+        """
+        if (self.cfg.get("mode") or "overlay") != which:
+            return True
+        action = (self.cfg.get("behavior") or {}).get("quit_action", "ask")
+        if action == "ask":
+            self.push({"type": "confirmQuit"})
+            return False          # 先不关,等用户在弹窗里选
+        if action in ("tray", "minimize"):
+            self.minimize_app()
+            return False
+        return True               # 直接退出:放行 → closed 回调里收尾
+
+    def _on_window_closed(self, which: str):
+        """窗口已关闭:当前模式的窗口被关掉就等于退出程序。"""
+        if which in ("overlay", "mini", "translate"):
+            self.quit_app()
+
+    def pause_hole(self, on: bool = True) -> bool:
+        """临时取消洞口穿透。
+
+        弹窗(退出询问、下载确认等)通常居中,一旦压在"洞口"那块被 SetWindowRgn 挖掉的
+        区域上,就会看不见也点不到;所以弹窗期间先让整窗可交互,关闭后再恢复。
+        """
+        self._hole_paused = bool(on)
+        if self._hole_paused:
+            self._clear_region()
+        elif self._hole_key:
+            key = self._hole_key
+            run_in_main(lambda: self._apply_region(*key))
+        return True
+
+    def _clear_region(self):
+        """清掉窗口区域(整窗矩形,全部可绘制/可点击)。"""
+        win = self.overlay
+        if win is None:
+            return
+
+        def do():
+            try:
+                import ctypes
+                from ctypes import wintypes
+                user32 = ctypes.windll.user32
+                user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HANDLE, wintypes.BOOL]
+                user32.SetWindowRgn.restype = ctypes.c_int
+                user32.SetWindowRgn(wintypes.HWND(int(win.native.winId())), None, True)
+                self._hole_active = False
+            except Exception:
+                pass
+
+        run_in_main(do)
 
     def _push_loop(self):
         while True:
@@ -260,6 +321,8 @@ class App:
         if mode not in ("overlay", "snip", "mini", "translate"):
             return
         if mode == self.cfg.get("mode") and mode != "snip":
+            if self._in_tray:
+                self.restore_app()      # 已在托盘里:同名模式也当作"唤回"
             return
         prev = self.cfg.get("mode") or "overlay"
         fresh_snip = False
@@ -517,6 +580,9 @@ class App:
         if key == self._hole_key:
             return True
         self._hole_key = key
+        # 教程/弹窗期间暂停了洞口穿透:只记下最新区域,等恢复时再挖(否则会把弹窗再裁掉)
+        if self._hole_paused:
+            return True
         run_in_main(lambda: self._apply_region(x, y, w, h))
         return True
 
@@ -686,20 +752,7 @@ class App:
         mode = str(mode or "")
         self._guide_mode = mode
         if mode == "overlay" and self.overlay is not None:
-            win = self.overlay
-
-            def clear():
-                try:
-                    import ctypes
-                    from ctypes import wintypes
-                    user32 = ctypes.windll.user32
-                    user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HANDLE, wintypes.BOOL]
-                    user32.SetWindowRgn.restype = ctypes.c_int
-                    user32.SetWindowRgn(wintypes.HWND(int(win.native.winId())), None, True)
-                except Exception:
-                    pass
-
-            run_in_main(clear)
+            self.pause_hole(True)          # 与弹窗同一个机制:让整窗可见可点
         elif mode == "mini" and self.mini is not None:
             try:
                 self._guide_mini_backup = int(self.mini.height)
@@ -723,8 +776,7 @@ class App:
             self._guide_mini_backup = 0
             run_in_main(lambda: self.mini.resize(int(self.mini.width), h))
         elif mode == "overlay" and self._hole_key:
-            key = self._hole_key
-            run_in_main(lambda: self._apply_region(*key))
+            self.pause_hole(False)
         return True
 
     def guide_reset(self) -> dict:
@@ -1111,7 +1163,7 @@ class App:
             "ctrl+1": lambda: self.set_mode("overlay"),
             "ctrl+2": lambda: self.set_mode("mini"),
             "ctrl+3": lambda: self.set_mode("snip"),
-            hk.get("exit", "ctrl+q"): self.quit_app,
+            hk.get("exit", "ctrl+q"): self.request_quit,
         }
         try:
             import keyboard
@@ -1128,7 +1180,169 @@ class App:
             self.push({"type": "hotkeyCapture"})
 
     # ================= 其它 =================
+    def request_quit(self):
+        """点"退出"或按 Ctrl+Q:按配置询问/直接退出/最小化到任务栏。"""
+        action = (self.cfg.get("behavior") or {}).get("quit_action", "ask")
+        if action == "exit":
+            self.quit_app()
+        elif action in ("tray", "minimize"):
+            self.minimize_app()
+        else:
+            # 只在当前显示的模式窗口里弹询问框
+            self.push({"type": "confirmQuit"})
+
+    def minimize_app(self):
+        """最小化到系统托盘(通知区域):隐藏窗口,程序继续在后台运行。
+
+        托盘图标左键点击 / 菜单「显示主界面」可唤回;Ctrl+1/2/3 等全局快捷键同样有效。
+        托盘不可用时(极少数环境)退回普通最小化,保证功能不丢。
+        """
+        mode = self.cfg.get("mode") or "overlay"
+        if mode == "snip":
+            self.cancel_snip()
+            mode = self._prev_mode if self._prev_mode in ("mini", "overlay", "translate") else "overlay"
+
+        ok = self._show_tray()
+        if not ok:
+            # 退路:没有托盘就退到任务栏最小化
+            win = self._win(mode)
+
+            def do_min():
+                try:
+                    if win is not None:
+                        win.minimize()
+                except Exception:
+                    pass
+
+            run_in_main(do_min)
+            self.push({"type": "status", "text": "已最小化到任务栏(Ctrl+1/2/3 可再次唤出)", "tone": "idle"})
+            return
+        self._in_tray = True
+
+        def do_hide():
+            for name, win in (("overlay", self.overlay), ("mini", self.mini), ("translate", self.translate)):
+                if win is None:
+                    continue
+                try:
+                    if name == mode:
+                        win.hide()
+                except Exception:
+                    pass
+            try:
+                if self.settings is not None:
+                    self.settings.hide()
+            except Exception:
+                pass
+            try:
+                if self.snip is not None:
+                    self.snip.hide()
+            except Exception:
+                pass
+
+        run_in_main(do_hide)
+        self.push({"type": "status", "text": "已最小化到托盘,程序在后台运行", "tone": "idle"})
+
+    def restore_app(self):
+        """从托盘恢复显示(托盘图标点击 / 菜单 / 全局快捷键)。"""
+        if not self._in_tray:
+            return False
+        self._in_tray = False
+        mode = self.cfg.get("mode") or "overlay"
+        if mode not in ("overlay", "mini", "translate"):
+            mode = "overlay"
+
+        def do_show():
+            for name, win in (("overlay", self.overlay), ("mini", self.mini), ("translate", self.translate)):
+                if win is None:
+                    continue
+                try:
+                    win.show() if name == mode else win.hide()
+                except Exception:
+                    pass
+            try:
+                if self.overlay is not None and mode == "overlay":
+                    self.overlay.restore()
+            except Exception:
+                pass
+
+        run_in_main(do_show)
+        self.push({"type": "status", "text": "已从托盘恢复", "tone": "ok"})
+        return True
+
+    def _show_tray(self) -> bool:
+        """创建/显示托盘图标(必须在 Qt 主线程创建)。返回是否可用。"""
+        box = {"ok": False}
+
+        def do():
+            try:
+                from PySide6.QtGui import QAction, QIcon
+                from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+                app = __import__("PySide6.QtWidgets", fromlist=["QApplication"]).QApplication.instance()
+                if app is None or not QSystemTrayIcon.isSystemTrayAvailable():
+                    return
+                if self._tray is None:
+                    icon = QIcon(str(cfgmod.ICON_PATH)) if cfgmod.ICON_PATH.exists() else QIcon()
+                    tray = QSystemTrayIcon(icon, app)
+                    tray.setToolTip("OCR 助手")
+                    menu = QMenu()
+                    act_show = QAction("显示主界面", menu)
+                    act_show.triggered.connect(lambda: self.restore_app())
+                    act_overlay = QAction("悬浮窗模式", menu)
+                    act_overlay.triggered.connect(lambda: self._tray_mode("overlay"))
+                    act_mini = QAction("迷你条模式", menu)
+                    act_mini.triggered.connect(lambda: self._tray_mode("mini"))
+                    act_tr = QAction("翻译模式", menu)
+                    act_tr.triggered.connect(lambda: self._tray_mode("translate"))
+                    act_set = QAction("设置", menu)
+                    act_set.triggered.connect(lambda: self._tray_settings())
+                    act_quit = QAction("退出", menu)
+                    act_quit.triggered.connect(lambda: self.quit_app())
+                    for a in (act_show, act_overlay, act_mini, act_tr, act_set):
+                        menu.addAction(a)
+                    menu.addSeparator()
+                    menu.addAction(act_quit)
+                    tray.setContextMenu(menu)
+                    tray.activated.connect(self._on_tray_activated)
+                    self._tray_menu = menu
+                    self._tray = tray
+                self._tray.show()
+                box["ok"] = True
+            except Exception as e:
+                self.push({"type": "status", "text": f"托盘不可用:{e}", "tone": "warn"})
+
+        run_in_main(do)
+        time.sleep(0.35)   # 等主线程建好后再返回可用性
+        return bool(box["ok"])
+
+    def _on_tray_activated(self, reason):
+        try:
+            from PySide6.QtWidgets import QSystemTrayIcon
+            if reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                          QSystemTrayIcon.ActivationReason.DoubleClick):
+                self.restore_app()
+        except Exception:
+            pass
+
+    def _tray_mode(self, mode: str):
+        self.restore_app()
+        self.set_mode(mode)
+
+    def _tray_settings(self):
+        self.restore_app()
+        self.open_settings()
+
+    def _hide_tray(self):
+        def do():
+            try:
+                if self._tray is not None:
+                    self._tray.hide()
+            except Exception:
+                pass
+
+        run_in_main(do)
+
     def quit_app(self):
+        self._hide_tray()
         try:
             self.cfg = cfgmod.load_config()
             cfgmod.save_config(self.cfg)

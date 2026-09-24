@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
+import QuitDialog from './QuitDialog'
 import Guide, { useGuide } from './Guide'
-import { EngineSwitch, Icon, IconBtn, IconSeg, QBox, ResizeHandles, Tip, useWindowDrag } from './ui'
+import { EngineSwitch, Icon, IconBtn, IconSeg, Logo, QBox, ResizeHandles, Tip, useWindowDrag } from './ui'
 
 const MODES = [
   { value: 'overlay', label: '悬浮窗', icon: 'overlay' },
@@ -52,7 +53,7 @@ export default function MiniBar() {
       <ResizeHandles which="mini" edges={['w', 'e']} />
       {/* 第一行:图标工具栏 */}
       <div className="shrink-0 flex items-center gap-2 px-2 h-[38px] drag-handle" data-guide="mini-drag" {...drag}>
-        <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag" title="OCR 助手">O</span>
+        <span className="no-drag" title="OCR 助手"><Logo size={22} /></span>
         <span className="w-1.5 h-1.5 rounded-full shrink-0 no-drag" style={{ background: tone }} />
         <span className="truncate text-[12px] text-muted flex-1 min-w-0 no-drag">{preview}</span>
         <span data-guide="mini-mode" className="flex items-center no-drag">
@@ -79,6 +80,7 @@ export default function MiniBar() {
               placeholder={`提问/指令:留空则默认「${cfg.behavior?.default_question || '请回答识别到的内容'}」`} />
       </div>
       <Guide mode="mini" open={guide.open} onClose={guide.stop} />
+      <QuitDialog mode="mini" />
     </div>
   )
 }

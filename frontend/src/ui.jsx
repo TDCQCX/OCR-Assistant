@@ -56,6 +56,23 @@ export function Icon({ name, size = 16, className = '', strokeWidth = 1.6 }) {
   )
 }
 
+/* ============================ 应用 LOGO(以打包版 exe 图标为唯一来源) ============================ */
+/** 图标来源:assets/app.ico → 构建时导出为 webui/logo.png(见 frontend/public/logo.png) */
+export function Logo({ size = 22, radius, className = '', style }) {
+  const r = radius ?? Math.max(4, Math.round(size * 0.26))
+  return (
+    <img
+      src="logo.png"
+      alt="OCR 助手"
+      width={size}
+      height={size}
+      draggable={false}
+      className={`shrink-0 select-none ${className}`}
+      style={{ width: size, height: size, borderRadius: r, ...style }}
+    />
+  )
+}
+
 /* ============================ 悬浮提示(自绘白底黑字,并夹在窗口内部) ============================ */
 /** 窗口过小时不再使用悬浮提示(提示框物理上放不下),改为就地展开文字 */
 export function useSmallWindow() {
@@ -434,6 +451,12 @@ export function DownloadHost({ children }) {
     load()
   }
   const close = () => setReq(null)
+
+  // 下载确认弹窗居中,会压在"被挖掉的洞口区域"上 → 打开期间临时取消洞口穿透
+  useEffect(() => {
+    call('pause_hole', !!req)
+    return () => { if (req) call('pause_hole', false) }
+  }, [req])
 
   const tiers = data?.tiers?.[req?.kind] || []
   const current = data?.current?.[req?.kind] || ''

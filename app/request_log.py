@@ -37,3 +37,23 @@ def day_counts(days: int = 140) -> dict:
         d = time.strftime("%Y-%m-%d", time.localtime(r["ts"]))
         counts[d] = counts.get(d, 0) + 1
     return counts
+
+
+def stats(days: int = 140) -> dict:
+    """统计:总请求次数、失败次数、成功率、平均耗时,以及最近 days 天的天数覆盖。"""
+    records = load()
+    total = len(records)
+    failed = sum(1 for r in records if not r.get("ok", True))
+    ok = total - failed
+    durations = [int(r.get("ms") or 0) for r in records if (r.get("ms") or 0) > 0]
+    return {
+        "total": total,
+        "ok": ok,
+        "failed": failed,
+        "success_rate": round(ok * 100.0 / total, 1) if total else 0.0,
+        "avg_ms": int(sum(durations) / len(durations)) if durations else 0,
+        "keep": MAX_RECORDS,
+        "days": days,
+        "first_ts": min((r.get("ts") or 0) for r in records) if records else 0,
+        "last_ts": max((r.get("ts") or 0) for r in records) if records else 0,
+    }

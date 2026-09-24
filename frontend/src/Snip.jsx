@@ -1,8 +1,8 @@
-﻿import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { call } from './bridge'
 import { applyTheme, resolveTheme } from './theme'
 import Guide, { useGuide } from './Guide'
-import { Btn, EngineSwitch, Icon, LangPair, QBox } from './ui'
+import { Btn, EngineSwitch, Icon, LangPair, Logo, QBox } from './ui'
 
 /** 自由截图模式:全屏遮罩 + 拖拽框选 → 识别 / 翻译 / 设为悬浮窗区域 */
 export default function Snip() {
@@ -137,7 +137,7 @@ export default function Snip() {
           style={{ background: 'var(--c-panel)', borderColor: 'var(--c-line)' }}
         >
           <div className="flex items-center justify-center gap-2 font-semibold">
-            <Icon name="snip" size={15} />
+            <Logo size={18} />
             自由截图模式
           </div>
           <div className="hint mt-1">按住鼠标左键拖拽框选区域 · 松开后可识别 / 翻译 / 设为悬浮窗区域 · Esc 取消</div>

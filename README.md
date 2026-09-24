@@ -8,7 +8,7 @@
 ![pywebview](https://img.shields.io/badge/Shell-pywebview%20%2B%20Qt-41CD52?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey)
-![Version](https://img.shields.io/badge/Version-2.4.0-orange)
+![Version](https://img.shields.io/badge/Version-2.6.3-orange)
 
 > **OCR 助手** — 三种截图模式 · 云端/本地双 OCR · 大模型图文答题的桌面工具。
 > 界面由 **React 18 + Tailwind CSS** 构建,后端为 Python(截图 / OCR / 模型调用 / 配置)。

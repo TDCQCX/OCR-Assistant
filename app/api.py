@@ -28,6 +28,13 @@ def _get_path(cfg: dict, path: str, default=None):
     return node
 
 
+def _dialog(kind: str):
+    """pywebview 新版用 FileDialog 枚举,旧版是模块级常量;这里做兼容。"""
+    fd = getattr(webview, "FileDialog", None)
+    if fd is not None:
+        return getattr(fd, kind)
+    return getattr(webview, f"{kind}_DIALOG")
+
 def _set_path(cfg: dict, path: str, value):
     parts = path.split(".")
     node = cfg
@@ -111,7 +118,7 @@ class Api:
 
     def pick_directory(self):
         try:
-            res = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+            res = webview.windows[0].create_file_dialog(_dialog('FOLDER'))
             if res:
                 return res[0] if isinstance(res, (list, tuple)) else res
         except Exception:
@@ -147,7 +154,11 @@ class Api:
         provs = cfg.get("providers", [])
         if not (0 <= int(i) < len(provs)):
             return {"provider": {}, "preview": "", "hints": {}}
-        return {"provider": provs[int(i)], "preview": self.provider_preview(i)}
+        prov = provs[int(i)]
+        # 带上该平台的常用模型 ID(配置里的 providers 是列表,不会随默认配置补齐,故按 id 回查预设)
+        models = list(prov.get("models") or []) or cfgmod.models_for(prov.get("id"))
+        return {"provider": prov, "preview": self.provider_preview(i),
+                "hints": {}, "models": models}
 
     def reset_provider_defaults(self, i: int) -> bool:
         """把某个平台的 Base URL / 模型还原为预设默认值(用户改坏地址后一键恢复)。"""
@@ -224,6 +235,38 @@ class Api:
     def guide_reset(self) -> dict:
         """清空所有模式的"已看过教程"记录。"""
         return self.app.guide_reset()
+
+    # ================= 退出 / 最小化 =================
+    def request_quit(self) -> bool:
+        """点退出按钮或按 Ctrl+Q:按配置弹询问框 / 直接退出 / 最小化到任务栏。"""
+        self.app.request_quit()
+        return True
+
+    def minimize_app(self) -> bool:
+        """最小化到托盘(程序继续在后台运行)。"""
+        self.app.minimize_app()
+        return True
+
+    def restore_app(self) -> bool:
+        """从托盘唤回主界面(托盘图标左键/菜单「显示主界面」也走这里)。"""
+        return self.app.restore_app()
+
+    def pause_hole(self, on: bool = True) -> bool:
+        """弹窗打开/关闭时调用:打开时临时取消洞口穿透(否则居中的弹窗会被裁掉看不见),
+        关闭后恢复。返回 True 表示已按预期设置。"""
+        return self.app.pause_hole(bool(on))
+
+    def set_quit_action(self, action: str) -> bool:
+        """记住退出方式:ask=每次都问 / exit=直接退出 / tray=最小化到托盘(后台运行)。"""
+        action = str(action or "ask")
+        if action == "minimize":       # 旧值:曾被实现成"缩到任务栏",现统一为托盘
+            action = "tray"
+        if action not in ("ask", "exit", "tray"):
+            return False
+        self.app.cfg.setdefault("behavior", {})["quit_action"] = action
+        cfgmod.save_config(self.app.cfg)
+        self.app.push({"type": "config", "config": self.app.cfg})
+        return True
 
     def provider_set(self, i: int, field: str, value) -> bool:
         cfg = self.app.cfg
@@ -345,7 +388,7 @@ class Api:
     def export_theme(self, theme_json: str) -> bool:
         try:
             win = self.app.settings or self.app.overlay
-            res = win.create_file_dialog(webview.SAVE_DIALOG, save_filename="ocr-assistant-theme.json")
+            res = win.create_file_dialog(_dialog('SAVE'), save_filename="ocr-assistant-theme.json")
             if not res:
                 return False
             path = res if isinstance(res, str) else res[0]
@@ -357,7 +400,7 @@ class Api:
     def import_theme(self):
         try:
             win = self.app.settings or self.app.overlay
-            res = win.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False,
+            res = win.create_file_dialog(_dialog('OPEN'), allow_multiple=False,
                                          file_types=("主题文件 (*.json)", "所有文件 (*.*)"))
             if not res:
                 return None
@@ -626,3 +669,7 @@ class Api:
 
     def request_log_days(self) -> dict:
         return request_log.day_counts(140)
+
+    def request_log_stats(self) -> dict:
+        """请求统计:总次数 / 失败次数 / 成功率 / 平均耗时(关于页右侧卡片用)。"""
+        return request_log.stats(140)

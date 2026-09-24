@@ -3,7 +3,7 @@ import { call } from './bridge'
 import { useApp } from './main'
 import Guide, { useGuide } from './Guide'
 import { applyTheme, resolveTheme, PRESETS, COLOR_FIELDS } from './theme'
-import { Btn, Card, ColorInput, Field, Icon, IconBtn, ModelTiers, Segmented, Switch, useToast } from './ui'
+import { Btn, Card, ColorInput, Field, Icon, IconBtn, Logo, ModelTiers, Segmented, Switch, useToast } from './ui'
 
 const NAV = [
   { key: 'model', label: '模型设置', icon: 'chip' },
@@ -24,7 +24,7 @@ export default function Settings() {
       {/* 左侧导航 */}
       <aside className="w-[168px] shrink-0 flex flex-col gap-1.5" data-guide="set-nav">
         <div className="flex items-center gap-2 px-1.5 pb-2">
-          <span className="logo-o w-[26px] h-[26px] text-[12px]">O</span>
+          <Logo size={26} />
           <div className="min-w-0">
             <div className="font-semibold text-[14px] leading-tight">OCR 助手</div>
             <div className="hint leading-tight">v{app.version}</div>
@@ -77,6 +77,7 @@ function ModelPage() {
   const [tplOpen, setTplOpen] = useState(false)
   const [tpl, setTpl] = useState('')
   const [activeId, setActiveId] = useState('')
+  const [models, setModels] = useState([])
 
   const reload = async (keep) => {
     const r = await call('list_providers')
@@ -90,6 +91,7 @@ function ModelPage() {
     const f = await call('provider_get', i)
     setForm(f.provider)
     setPreview(f.preview)
+    setModels(f.models || [])
   }
   useEffect(() => { reload() }, [])
 
@@ -269,9 +271,32 @@ function ModelPage() {
               </span>
             </div>
           </Field>
-          <Field label="模型 ID">
-            <input className="ctl" value={form.model || ''} placeholder="例如 qwen3.7-flash-2026-07-15 / gpt-4o-mini"
-                   onChange={(e) => patch('model', e.target.value)} />
+          <Field label="模型 ID" hint={models.length ? '可下拉选择常用模型,也可直接输入' : '该平台请手动填写模型 ID'}>
+            <div className="space-y-1.5">
+              <input className="ctl" list="model-presets" value={form.model || ''}
+                     placeholder="例如 qwen-vl-max / deepseek-chat / gpt-4o-mini"
+                     onChange={(e) => patch('model', e.target.value)} />
+              <datalist id="model-presets">
+                {models.map((m) => <option key={m} value={m} />)}
+              </datalist>
+              {models.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="hint shrink-0">常用:</span>
+                  {models.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => patch('model', m)}
+                      className="chip no-drag transition-colors"
+                      style={form.model === m
+                        ? { borderColor: 'var(--c-accent)', color: 'var(--c-accent)', background: 'var(--c-accent-soft)' }
+                        : undefined}
+                      title="点击填入该模型 ID"
+                    >{m}</button>
+                  ))}
+                </div>
+              )}
+            </div>
           </Field>
           <Field label="Base URL">
             <div className="flex gap-2">
@@ -396,6 +421,13 @@ function GeneralPage() {
 
       <Card title="行为与快捷键" icon="sliders">
         <div className="space-y-2">
+          <Field label="关闭程序时" hint="点电源键或按 Ctrl+Q 时的行为">
+            <Segmented value={app.cfg.behavior?.quit_action || 'ask'}
+                       options={[{ value: 'ask', label: '每次都问' },
+                                 { value: 'tray', label: '最小化到托盘' },
+                                 { value: 'exit', label: '直接退出' }]}
+                       onChange={(v) => call('set_quit_action', v).then(() => app.reload())} />
+          </Field>
           <Field label="默认提问">
             <input className="ctl" value={local.behavior?.default_question || ''}
                    onBlur={(e) => set('behavior.default_question', e.target.value)}
@@ -838,8 +870,13 @@ function GuidePage({ onGoPage }) {
 function AboutPage() {
   const app = useApp()
   const [days, setDays] = useState({})
+  const [stats, setStats] = useState(null)
   const about = app.cfg.app || {}
-  useEffect(() => { call('request_log_days').then(setDays) }, [])
+  const loadLog = () => {
+    call('request_log_days').then(setDays)
+    call('request_log_stats').then(setStats)
+  }
+  useEffect(() => { loadLog() }, [])
 
   const weeks = 20
   const cells = []
@@ -850,12 +887,14 @@ function AboutPage() {
     cells.push(days[key] || 0)
   }
   const levelColors = ['#9aa3b0', '#9be9a8', '#40c463', '#30a14e', '#216e39']
+  const total = stats?.total ?? 0
+  const failed = stats?.failed ?? 0
 
   return (
     <div className="space-y-3">
       <Card>
         <div className="flex items-center gap-4">
-          <span className="logo-o w-[52px] h-[52px] text-[24px]">O</span>
+          <Logo size={52} radius={14} />
           <div className="flex-1">
             <div className="text-[19px] font-bold">OCR 助手</div>
             <div className="hint">版本 v{app.version} · {about.features}</div>
@@ -864,11 +903,52 @@ function AboutPage() {
         </div>
       </Card>
 
-      <Card title="请求记录(最近 20 周)" icon="grid" right={<Btn onClick={() => call('request_log_days').then(setDays)}>刷新</Btn>}>
-        <div className="grid grid-flow-col grid-rows-7 gap-[3px]">
-          {cells.map((c, i) => (
-            <span key={i} className="w-[11px] h-[11px] rounded-[2px]" style={{ background: levelColors[Math.min(4, c)] }} title={`${c} 次请求`} />
-          ))}
+      <Card title="请求记录(最近 20 周)" icon="grid"
+            right={<Btn onClick={loadLog}>刷新</Btn>}>
+        {/* 整组居中:左绿块图(略放大)+ 右统计卡片,两者靠近 */}
+        <div className="flex items-center justify-center gap-5">
+          <div className="shrink-0">
+            <div className="grid grid-flow-col grid-rows-7 justify-start auto-cols-max gap-[3px]">
+              {cells.map((c, i) => (
+                <span key={i} className="w-[13px] h-[13px] rounded-[2px]"
+                      style={{ background: levelColors[Math.min(4, c)] }}
+                      title={`${c} 次请求`} />
+              ))}
+            </div>
+            <div className="hint mt-2 flex items-center justify-center gap-1.5">
+              <span>少</span>
+              {levelColors.map((c) => (
+                <span key={c} className="w-[10px] h-[10px] rounded-[2px] inline-block"
+                      style={{ background: c }} />
+              ))}
+              <span>多</span>
+            </div>
+          </div>
+
+          {/* 右:请求次数 / 失败数(紧贴绿块图,不再推到卡片最右) */}
+          <div className="w-[152px] shrink-0 space-y-2">
+            <div className="inset px-3 py-2">
+              <div className="hint">请求次数</div>
+              <div className="text-[21px] font-bold leading-tight">{total}</div>
+            </div>
+            <div className="inset px-3 py-2">
+              <div className="hint">请求失败数</div>
+              <div className="text-[21px] font-bold leading-tight"
+                   style={{ color: failed > 0 ? 'var(--c-danger)' : 'var(--c-ok)' }}>
+                {failed}
+              </div>
+              {stats && stats.total > 0 && (
+                <div className="hint mt-0.5">
+                  成功率 {stats.success_rate}%{stats.avg_ms ? ` · 平均 ${(stats.avg_ms / 1000).toFixed(1)}s` : ''}
+                </div>
+              )}
+            </div>
+            {stats && (
+              <div className="hint px-1 leading-snug">
+                统计最近 {Math.round((stats.days || 140) / 7)} 周,最多保留 {stats.keep} 条
+              </div>
+            )}
+          </div>
         </div>
       </Card>
 
@@ -887,8 +967,16 @@ function AboutPage() {
         </div>
       </Card>
 
-      <Card title={`开源许可证:${about.license || 'MIT'}`} icon="info">
-        <p className="hint">MIT License — 允许自由使用、修改与分发,需保留版权声明。</p>
+      <Card title={`开源许可证:${about.license || 'CC BY-NC 4.0'}`} icon="info">
+        <p className="hint leading-relaxed">
+          {String(about.license || '').toUpperCase().includes('MIT')
+            ? 'MIT License — 允许自由使用、修改与分发,需保留版权声明。'
+            : 'CC BY-NC 4.0(署名—非商业性使用 4.0 国际):禁止任何商业使用;转载、镜像、二次分发与衍生作品必须标注原作者与项目名、给出原始仓库地址并保留协议全文。个人学习、研究与教学等非商业用途可自由使用与修改。'}
+        </p>
+        <div className="flex items-center gap-2 mt-2">
+          <Btn onClick={() => call('open_url', `${about.github}/blob/master/LICENSE`)}>查看协议全文</Btn>
+          <span className="hint">端侧翻译「均衡/全量」档所用 NLLB-200 模型同为 CC BY-NC 4.0</span>
+        </div>
       </Card>
     </div>
   )

@@ -17,8 +17,12 @@ else:
 CONFIG_PATH = ROOT / "config.json"
 BACKUP_PATH = ROOT / "config.json.bak"     # 上一次的配置(防误覆盖)
 
+# 资源根目录:打包后资源解包在 _MEIPASS,源码运行则是项目根目录
+RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", ROOT)) if getattr(sys, "frozen", False) else ROOT
+ICON_PATH = RESOURCE_ROOT / "assets" / "app.ico"   # 窗口/任务栏图标(与 exe 图标同源)
+
 # 程序版本的唯一来源:界面「关于」页、exe 属性、文档均以此为准
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.6.3"
 
 DEFAULT_OCR_PROMPT = (
     "你是一个高精度OCR文字识别引擎。请仔细观察这张截图,识别图中所有可见的文字内容,"
@@ -98,36 +102,44 @@ PROVIDER_PRESETS = [
         "homepage": "https://bailian.console.aliyun.com/",
         "api_key": "", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
         "model": "", "enable_thinking": False,
+        "models": ["qwen-vl-max", "qwen-vl-plus", "qwen2.5-vl-72b-instruct", "qwen-max",
+                   "qwen-plus", "qwen-turbo", "qvq-max"],
     },
     {
         "id": "openai", "name": "OpenAI", "color": "#10A37F", "logo": "",
         "note": "", "homepage": "https://platform.openai.com/",
         "api_key": "", "base_url": "https://api.openai.com/v1",
         "model": "", "enable_thinking": False,
+        "models": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o4-mini"],
     },
     {
         "id": "deepseek", "name": "DeepSeek", "color": "#4D6BFE", "logo": "",
         "note": "", "homepage": "https://platform.deepseek.com/",
         "api_key": "", "base_url": "https://api.deepseek.com/v1",
         "model": "", "enable_thinking": False,
+        "models": ["deepseek-chat", "deepseek-reasoner"],
     },
     {
         "id": "zhipu", "name": "智谱 GLM", "color": "#3859FF", "logo": "",
         "note": "", "homepage": "https://open.bigmodel.cn/",
         "api_key": "", "base_url": "https://open.bigmodel.cn/api/paas/v4",
         "model": "", "enable_thinking": False,
+        "models": ["glm-4v-plus", "glm-4v", "glm-4-plus", "glm-4-air", "glm-4-flash"],
     },
     {
         "id": "moonshot", "name": "月之暗面 Kimi", "color": "#232323", "logo": "",
         "note": "", "homepage": "https://platform.moonshot.cn/",
         "api_key": "", "base_url": "https://api.moonshot.cn/v1",
         "model": "", "enable_thinking": False,
+        "models": ["kimi-latest", "moonshot-v1-8k-vision-preview", "moonshot-v1-32k",
+                   "moonshot-v1-128k"],
     },
     {
         "id": "ollama", "name": "Ollama 本地", "color": "#6B7280", "logo": "",
         "note": "", "homepage": "https://ollama.com/",
         "api_key": "", "base_url": "http://localhost:11434/v1",
         "model": "", "enable_thinking": False,
+        "models": ["qwen2.5vl:7b", "llava:7b", "llama3.2:3b", "qwen2.5:7b"],
     },
 ]
 
@@ -209,8 +221,8 @@ DEFAULT_CONFIG = {
         "exit": "ctrl+q",              # 退出程序
     },
     "behavior": {
-        "default_question": "请回答识别到的内容",
-        # 示例提问(界面下拉可选,可在设置中编辑)
+        "default_question": "请回答识别到的内容",        # 示例提问(界面下拉可选,可在设置中编辑)
+        "quit_action": "ask",          # 退出方式: ask=弹窗询问 / exit=直接退出 / tray=最小化到托盘(后台运行)
         "question_presets": [
             "请回答识别到的内容",
             "请翻译识别到的内容",
@@ -256,6 +268,19 @@ THINKING_PROVIDER_IDS = ("bailian",)
 def provider_ready(p: dict) -> bool:
     """该平台是否已配置(填了 API Key)。"""
     return bool((p.get("api_key") or "").strip())
+
+
+def models_for(provider_id: str) -> list:
+    """该平台的常用模型 ID 列表(内置预设)。
+
+    已存在的配置里 providers 是列表,不会随默认配置自动补齐,因此这里按 id 回查预设,
+    保证界面上始终能拿到可选项。
+    """
+    pid = str(provider_id or "")
+    for preset in PROVIDER_PRESETS:
+        if preset.get("id") == pid:
+            return list(preset.get("models") or [])
+    return []
 
 
 def ensure_active_provider(cfg: dict) -> str:

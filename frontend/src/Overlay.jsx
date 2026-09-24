@@ -1,11 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
+import QuitDialog from './QuitDialog'
 import Guide, { useGuide } from './Guide'
-import {
-  Btn, Collapse, EngineSwitch, Icon, IconBtn, IconSeg, Pill, QBox, ResizeHandles, Tip,
-  useDownloader, useSmallWindow, useToast, useWindowDrag,
-} from './ui'
+import { Btn, Collapse, EngineSwitch, Icon, IconBtn, IconSeg, Logo, Pill, QBox, ResizeHandles, Tip, useDownloader, useSmallWindow, useToast, useWindowDrag } from './ui'
 
 const MODES = [
   { value: 'overlay', label: '悬浮窗', icon: 'overlay' },
@@ -185,7 +183,7 @@ export default function Overlay() {
       <ResizeHandles which="overlay" onStart={() => { wantHoleRef.current = null }} />
       {/* ================= 顶部:图标工具栏(可拖动) ================= */}
       <header className="panel shrink-0 h-10 px-2 flex items-center gap-2 drag-handle" {...dragHeader}>
-        <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag">O</span>
+        <span className="no-drag" title="OCR 助手"><Logo size={22} /></span>
         <span data-guide="mode" className="no-drag flex items-center">
           <IconSeg size="sm" value="overlay" options={MODES} onChange={(m) => app.setMode(m)} />
         </span>
@@ -293,6 +291,7 @@ export default function Overlay() {
         )}
       </footer>
       <Guide mode="overlay" open={guide.open} onClose={guide.stop} />
+      <QuitDialog mode="overlay" />
     </div>
   )
 }

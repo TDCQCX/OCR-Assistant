@@ -1,7 +1,7 @@
 {
   "name": "ocr-assistant-ui",
   "private": true,
-  "version": "2.4.0",
+  "version": "2.6.3",
   "type": "module",
   "scripts": {
     "dev": "vite",

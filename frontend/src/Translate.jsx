@@ -1,11 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
+import QuitDialog from './QuitDialog'
 import Guide, { useGuide } from './Guide'
-import {
-  Btn, EngineSwitch, Icon, IconBtn, IconSeg, LangPair, Pill, QBox, ResizeHandles, Segmented,
-  Tip, useDownloader, useToast, useWindowDrag,
-} from './ui'
+import { Btn, EngineSwitch, Icon, IconBtn, IconSeg, LangPair, Logo, Pill, QBox, ResizeHandles, Segmented, Tip, useDownloader, useToast, useWindowDrag } from './ui'
 
 const MODES = [
   { value: 'overlay', label: '悬浮窗', icon: 'overlay' },
@@ -93,7 +91,7 @@ export default function Translate() {
       <ResizeHandles which="translate" />
       {/* 顶部:图标 + 两个引擎开关 */}
       <header className="panel shrink-0 h-10 px-2 flex items-center gap-2 drag-handle" {...drag}>
-        <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag">O</span>
+        <span className="no-drag" title="OCR 助手"><Logo size={22} /></span>
         <IconSeg size="sm" value="translate" options={MODES} onChange={(m) => app.setMode(m)} />
         <span className="flex-1" />
         <EngineSwitch cloud={ocrCloud} onChange={setOcr} label="识别" tips={['云端', '本地']} />
@@ -203,6 +201,7 @@ export default function Translate() {
         </Tip>
       </footer>
       <Guide mode="translate" open={guide.open} onClose={guide.stop} />
+      <QuitDialog mode="translate" />
     </div>
   )
 }
