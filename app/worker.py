@@ -109,6 +109,7 @@ class PipelineWorker(threading.Thread):
             engine_name = info["engine"]
         else:
             prompt = (self._answer_prompt
+                      .replace("{mode}", "翻译模式")
                       .replace("{source_lang}", src_lang)
                       .replace("{target_lang}", dst_lang)
                       .replace("{count}", str(len(segments)))
@@ -159,6 +160,7 @@ class PipelineWorker(threading.Thread):
 
             self._on_status("OCR完成,正在获取回答…", "working")
             prompt = (self._answer_prompt
+                      .replace("{mode}", "识别/答题模式")
                       .replace("{qtype}", parsed.question_type or "未知")
                       .replace("{qtitle}", parsed.question or ocr_text[:200])
                       .replace("{options}", parsed.options_text)

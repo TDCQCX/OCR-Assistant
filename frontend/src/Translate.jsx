@@ -111,10 +111,10 @@ export default function Translate() {
         <span className="flex-1" />
         <IconBtn icon="refresh" tip="自动刷新(定时重新捕获并翻译)" active={!!tr.auto_refresh}
                  onClick={async () => { await call('set_auto_refresh', !tr.auto_refresh); app.reload() }} />
-        <Btn primary icon="scan" disabled={busy} onClick={() => call('run_translate', question)}>
-          {busy ? '处理中' : '捕获并翻译'}
+        <Btn primary icon="snip" disabled={busy} onClick={() => call('snip_translate')}>
+          {busy ? '处理中' : '框选并翻译'}
         </Btn>
-        <IconBtn icon="snip" tip="框选新区域并翻译" onClick={() => call('snip_translate')} />
+        <IconBtn icon="refresh" tip="复用上次框选区域重新翻译" onClick={() => call('run_translate', question)} />
         <IconBtn icon="copy" tip="复制译文" onClick={async () => {
           const text = pairs.map((p) => p.dst).filter(Boolean).join('\n')
           const ok = await call('copy_text', text)

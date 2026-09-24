@@ -32,9 +32,10 @@ DEFAULT_OCR_PROMPT = (
 )
 
 DEFAULT_ANSWER_PROMPT = (
-    "你是通用识别与问答助手。以下是用户截取的画面内容:"
+    "你是通用识别与问答助手,当前处于「{mode}」。以下是用户截取的画面内容:"
     "①OCR识别出的文字(可能不完整或有误,请以截图为准);②原始截图图片。\n"
     "用户的指令:{question}\n\n"
+    "输出语言:使用与用户指令相同的语言作答(用户用中文提问就用中文回答,用英文提问就用英文回答)。\n"
     "请严格按用户指令处理,并遵守以下规则:\n"
     "1. 指令要求「回答/解答」:直接给出答案;选择题给出选项字母与对应内容,其他题型给出对应答案;\n"
     "2. 指令要求「翻译」:只输出译文,逐行对应原文,不要解释、不要重复原文;\n"
@@ -53,6 +54,9 @@ DEFAULT_ANSWER_PROMPT = (
 DEFAULT_TRANSLATE_PROMPT = (
     "你是专业翻译引擎。下面是一个 JSON 数组,共 {count} 个字符串,"
     "请把每一项从「{source_lang}」翻译为「{target_lang}」。\n"
+    "【最重要的约束】无论截图里是什么语言、无论图片内容与文字是否一致,"
+    "输出的每一项都必须是「{target_lang}」,禁止照抄原文语言,禁止输出中文以外的语言"
+    "(当目标语言不是中文时)。\n"
     "请只输出一个 JSON 数组,长度与输入相同,第 i 项对应输入第 i 项的译文;"
     "不要输出解释、编号、分隔符或任何多余文字,也不要在译文里包含原文。\n"
     "示例:输入 [\"Hello\",\"Bye\"] 则输出 [\"你好\",\"再见\"]\n"
@@ -262,6 +266,16 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
+def _migrate_prompts(cfg: dict) -> bool:
+    """把旧版翻译提示词升级为新版(旧版要求 TAB 逐行输出,与当前 JSON 输入不匹配)。"""
+    prompts = cfg.setdefault("prompts", {})
+    cur = prompts.get("translate") or ""
+    if "JSON 数组" not in cur:
+        prompts["translate"] = DEFAULT_TRANSLATE_PROMPT
+        return True
+    return False
+
+
 def load_config() -> dict:
     """读取配置;并把 app.version 同步为程序版本(单一来源)。"""
     cfg = json.loads(json.dumps(DEFAULT_CONFIG, ensure_ascii=False))
@@ -272,7 +286,9 @@ def load_config() -> dict:
         except Exception:
             pass  # 配置损坏时使用默认值
     try:
-        merged.setdefault("app", {})["version"] = APP_VERSION
+        cfg.setdefault("app", {})["version"] = APP_VERSION
+        if _migrate_prompts(cfg):
+            save_config(cfg)
     except Exception:
         pass
     return cfg

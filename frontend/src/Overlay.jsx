@@ -21,7 +21,7 @@ export default function Overlay() {
   const holeRef = useRef(null)
   const dragHeader = useWindowDrag('overlay')
   const dragFooter = useWindowDrag('overlay')
-  const [question, setQuestion] = useState(cfg.behavior?.default_question || '请回答识别到的内容')
+  const [question, setQuestion] = useState('')  // 仅作为输入;默认提问以灰色占位提示展示
   const [borderHidden, setBorderHidden] = useState(false)
   const [size, setSize] = useState({ w: cfg.window?.width || 640, h: cfg.window?.height || 680 })
   const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)
@@ -110,9 +110,13 @@ export default function Overlay() {
     return () => window.removeEventListener('ocr-event', onEvent)
   })
 
+  const defaultQuestion = cfg.behavior?.default_question || '请回答识别到的内容'
+
   const run = () => {
+    const q = question.trim()
+    if (!q) toast(`未填写提问,将按默认指令执行:${defaultQuestion}`)
     const r = holeRef.current.getBoundingClientRect()
-    call('run_pipeline_rect', { x: r.x, y: r.y, w: r.width, h: r.height, dpr: window.devicePixelRatio }, question)
+    call('run_pipeline_rect', { x: r.x, y: r.y, w: r.width, h: r.height, dpr: window.devicePixelRatio }, q)
   }
 
   // 输入框填报的是"洞口尺寸":窗口尺寸 = 洞口 + 标题栏/底部面板(并做收敛校正)
@@ -208,7 +212,8 @@ export default function Overlay() {
       <footer className={`panel shrink-0 border-t px-2.5 space-y-2 ${small ? 'py-1.5' : 'py-2'}`}>
         <div className="flex items-start gap-2">
           <QBox value={question} onChange={setQuestion} rows={small ? 1 : 2} className="flex-1 no-drag"
-                presets={cfg.behavior?.question_presets} history={cfg.behavior?.question_history} />
+                presets={cfg.behavior?.question_presets} history={cfg.behavior?.question_history}
+                placeholder={`提问/指令(留空则默认:${defaultQuestion})`} />
           <div className="flex flex-col gap-1.5">
             <Btn primary icon="scan" disabled={busy} onClick={run}>{busy ? '处理中' : '识别'}</Btn>
             {!small && (
