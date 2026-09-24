@@ -16,6 +16,9 @@ else:
     ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.json"
 
+# 程序版本的唯一来源:界面「关于」页、exe 属性、文档均以此为准
+APP_VERSION = "2.4.0"
+
 DEFAULT_OCR_PROMPT = (
     "你是一个高精度OCR文字识别引擎。请仔细观察这张截图,识别图中所有可见的文字内容,"
     "包括中文、英文、数字、标点符号、题目、选项、标题、正文等。\n"
@@ -214,7 +217,7 @@ DEFAULT_CONFIG = {
         "add_to_knowledge": False,               # 是否将 AI 回答自动添加到本地知识库
     },
     "app": {
-        "version": "2.4.0",
+        "version": APP_VERSION,
         "github": "https://github.com/TDCQCX/OCR-Assistant",  # 关于页跳转地址
         "qq_group": "1108236960",
         "license": "CC BY-NC 4.0",
@@ -293,6 +296,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def load_config() -> dict:
+    """读取配置;并把 app.version 同步为程序版本(单一来源)。"""
     cfg = json.loads(json.dumps(DEFAULT_CONFIG, ensure_ascii=False))
     if CONFIG_PATH.exists():
         try:
@@ -300,6 +304,10 @@ def load_config() -> dict:
             cfg = _deep_merge(cfg, data)
         except Exception:
             pass  # 配置损坏时使用默认值
+    try:
+        merged.setdefault("app", {})["version"] = APP_VERSION
+    except Exception:
+        pass
     return cfg
 
 

@@ -20,13 +20,13 @@ function App() {
   const [result, setResult] = useState(null)
   const [history, setHistory] = useState([])
   const [busy, setBusy] = useState(false)
-  const [version, setVersion] = useState('2.0.0')
+  const [version, setVersion] = useState('')
 
   // 初始化:拉取状态 + 注册后端事件
   useEffect(() => {
     call('get_state').then((s) => {
       setCfg(s.config)
-      setVersion(s.version || '2.0.0')
+      setVersion(s.version || '')
       if (s.history) setHistory(s.history)
       setStatus({ text: s.key_ready ? '就绪 · Key 已配置' : '就绪 · Key 未配置', tone: s.key_ready ? 'idle' : 'warn' })
     })

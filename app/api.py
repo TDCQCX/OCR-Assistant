@@ -46,7 +46,7 @@ class Api:
         prov = cfgmod.active_provider(cfg)
         return {
             "config": cfg,
-            "version": cfg.get("app", {}).get("version", "2.0.0"),
+            "version": cfgmod.APP_VERSION,
             "key_ready": bool((prov.get("api_key") or "").strip()),
             "history": history.load(),
             "mode": cfg.get("mode", "overlay"),
