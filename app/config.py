@@ -15,6 +15,7 @@ if getattr(sys, "frozen", False):
 else:
     ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.json"
+BACKUP_PATH = ROOT / "config.json.bak"     # 上一次的配置(防误覆盖)
 
 # 程序版本的唯一来源:界面「关于」页、exe 属性、文档均以此为准
 APP_VERSION = "2.4.0"
@@ -301,6 +302,14 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
-    CONFIG_PATH.write_text(
-        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    """写盘。写之前把上一次的配置留一份 config.json.bak:
+    误填/误覆盖 API Key、配置写坏时还能捞回来。"""
+    text = json.dumps(cfg, ensure_ascii=False, indent=2)
+    try:
+        if CONFIG_PATH.exists():
+            prev = CONFIG_PATH.read_text(encoding="utf-8")
+            if prev.strip() and prev.strip() != text.strip():
+                BACKUP_PATH.write_text(prev, encoding="utf-8")
+    except Exception:
+        pass
+    CONFIG_PATH.write_text(text, encoding="utf-8")

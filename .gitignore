@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 config.json
+config.json.bak
 request_log.json
 history.json
 models/
