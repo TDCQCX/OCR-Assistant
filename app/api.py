@@ -190,11 +190,12 @@ class Api:
     def guide_start(self, mode: str) -> bool:
         """从任意入口(设置页/各模式的「新手教程」按钮)发起某个模式的引导。
 
-        需要先把对应模式的窗口显示出来,再广播 guideStart 事件让该窗口弹出气泡。
+        需要先把对应模式的窗口显示出来,再记为待引导并广播 guideStart 事件。
         """
         mode = str(mode or "")
         if mode in ("overlay", "mini", "translate", "snip"):
             self.app.set_mode(mode)
+        self.app._guide_pending = mode
 
         def later():
             time.sleep(0.45)   # 等窗口显示/页面就绪
@@ -202,6 +203,10 @@ class Api:
 
         threading.Thread(target=later, daemon=True).start()
         return True
+
+    def guide_pending(self) -> str:
+        """前端挂载时拉取待引导模式(事件可能早于监听注册而丢失)。"""
+        return self.app.guide_pending()
 
     def guide_done(self, mode: str) -> bool:
         """标记某个模式的教程已完成(下次进入不再自动弹出)。"""

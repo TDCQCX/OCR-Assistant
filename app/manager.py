@@ -52,6 +52,7 @@ class App:
         self._auto_stop = threading.Event()
         self._guide_mode = ""
         self._guide_mini_backup = 0
+        self._guide_pending = ""
         # 前端事件统一由独立线程推送:evaluate_js 会阻塞等待 JS 结果,
         # 若在 Qt 主线程调用会死锁(界面无响应),因此必须走非 GUI 线程。
         self._push_q = queue.Queue(maxsize=128)
@@ -712,6 +713,8 @@ class App:
         """教程结束:恢复迷你条高度与悬浮窗的洞口穿透区域。"""
         mode = str(mode or "")
         self._guide_mode = ""
+        if self._guide_pending == mode:
+            self._guide_pending = ""
         if mode == "mini" and self.mini is not None:
             # 教程进行中迷你条被临时加高,不要在这里压回去,否则气泡会被挤掉
             if self._guide_mode == "mini":
@@ -751,14 +754,16 @@ class App:
         return False
 
     def maybe_guide(self, mode: str, delay: float = 0.9):
-        """首次进入某个模式时自动开始引导(只看当前真正显示的模式窗口)。
+        """首次进入某个模式时安排引导(只看当前真正显示的模式窗口)。
 
-        之前由前端在页面挂载时自动开始,但三个模式窗口是启动时就创建好的(隐藏),
-        会在用户看不到的时候就把教程"播放"掉。
+        - 只登记「待引导」并推一次事件;真正的 guide_begin(清洞口穿透/加高迷你条)
+          由前端在气泡真正弹出时调用,避免事件丢失时把界面留在异常状态。
+        - 前端挂载时会主动拉取 guide_pending,双保险。
         """
         mode = str(mode or "")
         if not mode or (self.cfg.get("ui") or {}).get("guideDone", {}).get(mode):
             return False
+        self._guide_pending = mode
 
         def later():
             time.sleep(delay)
@@ -766,15 +771,18 @@ class App:
                 return
             if not self._wait_window_ready(mode):
                 return
-            try:
-                self.guide_begin(mode)
-                time.sleep(0.25)
-                self.push({"type": "guideStart", "mode": mode})
-            except Exception:
-                pass
+            self.push({"type": "guideStart", "mode": mode})
 
         threading.Thread(target=later, daemon=True).start()
         return True
+
+    def guide_pending(self) -> str:
+        """当前待引导的模式(前端挂载时拉取,避免事件早于监听注册而丢失)。"""
+        mode = self._guide_pending or ""
+        if mode and (self.cfg.get("ui") or {}).get("guideDone", {}).get(mode):
+            self._guide_pending = ""
+            return ""
+        return mode
 
     # ================= 设置窗口 =================
     def open_settings(self):

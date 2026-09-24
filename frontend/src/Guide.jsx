@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { call } from './bridge'
 import { Icon } from './ui'
 
@@ -44,11 +44,17 @@ export const GUIDE_STEPS = {
   ],
 }
 
-/** 引导控制:由后端在「首次进入该模式」时发 guideStart 事件触发(避免隐藏窗口提前播放) */
+/** 引导控制:后端在「首次进入该模式」时登记 pending 并发 guideStart;这里事件+拉取双保险 */
 export function useGuide(mode) {
   const [open, setOpen] = useState(false)
   const markDone = useCallback(() => {
     call('guide_done', mode)
+  }, [mode])
+
+  const openNow = useCallback(async () => {
+    // 真正开始时才让后端清洞口穿透/加高迷你条:事件丢失时界面不会被留在异常状态
+    try { await call('guide_begin', mode) } catch (e) { /* 忽略 */ }
+    setOpen(true)
   }, [mode])
 
   const stop = useCallback(async () => {
@@ -59,11 +65,29 @@ export function useGuide(mode) {
 
   useEffect(() => {
     const onEvent = (e) => {
-      if (e?.detail?.type === 'guideStart' && (e.detail.mode || '') === mode) setOpen(true)
+      if (e?.detail?.type === 'guideStart' && (e.detail.mode || '') === mode) openNow()
     }
     window.addEventListener('ocr-event', onEvent)
     return () => window.removeEventListener('ocr-event', onEvent)
-  }, [mode])
+  }, [mode, openNow])
+
+  // 兜底:页面挂载时主动拉取「待引导」状态(事件可能早于监听注册而丢失)
+  useEffect(() => {
+    let alive = true
+    let tries = 0
+    let timer = null
+    const tick = async () => {
+      if (!alive || tries > 20) return
+      tries += 1
+      try {
+        const pending = await call('guide_pending')
+        if (alive && pending === mode) { openNow(); return }
+      } catch (e) { /* 忽略 */ }
+      timer = setTimeout(tick, 500)
+    }
+    tick()
+    return () => { alive = false; if (timer) clearTimeout(timer) }
+  }, [mode, openNow])
 
   return { open, stop }
 }
