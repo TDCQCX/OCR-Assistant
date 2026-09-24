@@ -20,6 +20,34 @@ class AgentError(Exception):
     """带用户友好信息的接口错误。"""
 
 
+def chat_endpoint(base_url: str) -> str:
+    """把用户填写的 Base URL 归一化成真正的聊天接口地址。
+
+    各家官方文档给的 Base URL 形式不统一(有的带 /v1,有的带 /v4,有的直接给完整接口),
+    这里统一处理,避免把请求发到 Base URL 本身而返回 404:
+      https://api.deepseek.com          -> https://api.deepseek.com/v1/chat/completions
+      https://api.deepseek.com/v1       -> https://api.deepseek.com/v1/chat/completions
+      https://api.openai.com/v1         -> https://api.openai.com/v1/chat/completions
+      https://open.bigmodel.cn/api/paas/v4 -> .../v4/chat/completions
+      http://localhost:11434/v1         -> http://localhost:11434/v1/chat/completions
+      https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions -> 原样使用
+    若用户填的是自建网关/Ollama 原生接口(以 /api/chat 结尾)则原样使用。
+    """
+    url = (base_url or "").strip().rstrip("/")
+    if not url:
+        return url
+    low = url.lower()
+    for tail in ("/chat/completions", "/completions", "/api/chat", "/messages"):
+        if low.endswith(tail):
+            return url
+    # 只有主机名(没有路径)时,按各家惯例补 /v1
+    after_scheme = url.split("://", 1)[-1]
+    has_path = "/" in after_scheme
+    if not has_path:
+        return url + "/v1/chat/completions"
+    return url + "/chat/completions"
+
+
 class AgentClient:
     def __init__(self, api_key: str, model: str, api_base: str,
                  request_template: str = "", timeout: int = 180,
@@ -27,7 +55,7 @@ class AgentClient:
                  backoff: float = 0.8, enable_thinking: bool = False):
         self.api_key = (api_key or "").strip()
         self.model = (model or "").strip()
-        self.api_base = (api_base or "").strip()
+        self.api_base = chat_endpoint(api_base)
         self.request_template = request_template or DEFAULT_REQUEST_TEMPLATE
         self.timeout = timeout
         self.max_side = max_side
@@ -91,6 +119,12 @@ class AgentClient:
                         detail = resp.json().get("error", {}).get("message", resp.text[:300])
                     except Exception:
                         detail = resp.text[:300]
+                    if resp.status_code == 404:
+                        raise AgentError(
+                            f"接口返回 404(请求地址:{self.api_base})。"
+                            f"通常是 Base URL 填错,或模型 ID 不存在:{detail}")
+                    if resp.status_code in (401, 403):
+                        raise AgentError(f"接口返回 {resp.status_code}:API Key 无效或无该模型权限:{detail}")
                     raise AgentError(f"接口返回 {resp.status_code}:{detail}")
                 else:
                     try:
@@ -136,4 +170,11 @@ class AgentClient:
             detail = resp.json().get("error", {}).get("message", resp.text[:200])
         except Exception:
             detail = resp.text[:200]
+        if resp.status_code == 404:
+            return (f"Base URL 或模型 ID 不正确(实际请求:{self.api_base})。"
+                    f"Base URL 只填到 /v1 即可,程序会自动补 /chat/completions;{detail}")
+        if resp.status_code in (401, 403):
+            return f"API Key 无效或无权限({resp.status_code}):{detail}"
+        if resp.status_code == 400:
+            return f"请求被拒绝(通常是模型 ID 错误或参数不支持):{detail}"
         return f"失败({resp.status_code}):{detail}"

@@ -5,6 +5,17 @@
 
 ## [2.4.0] - 2026-09-14
 
+### 修复(重要)
+
+- **修复非百炼平台连通性测试一律 404 的问题(严重)**:预设里只有阿里云百炼填写了完整接口地址,
+  OpenAI / DeepSeek / 智谱 GLM / Kimi / Ollama 只填写了 Base URL 前缀(`.../v1`、`/api/paas/v4`),
+  而客户端直接向该地址 POST,导致 **404**;该问题同时影响连通性测试与实际的识别/答题/翻译调用。
+  现在新增 `chat_endpoint()` 统一归一化:Base URL 填 `https://api.deepseek.com`、
+  `https://api.deepseek.com/v1` 或完整接口地址都能正确请求;自建网关/Ollama 原生 `/api/chat` 原样使用。
+- 错误提示更明确:404 会直接提示"Base URL 或模型 ID 不正确"并给出实际请求地址;
+  401/403 提示 API Key 无效或无权限;400 提示模型 ID 或参数问题。
+
+
 ### 新增
 
 - **端侧翻译新增均衡 / 全量档(官方 NLLB 模型)**:接入 `facebook/nllb-200-distilled-600M`(均衡,约 2.4GB)
