@@ -118,6 +118,13 @@ class App:
             for win in (self.overlay, self.mini, self.translate, self.settings, self.snip):
                 if win is None:
                     continue
+                # 页面还没注入完 pywebview 桥时 evaluate_js 会阻塞 20s 才抛错,
+                # 会把后面的事件堵住;未就绪的窗口直接跳过(前端挂载时会主动回拉状态)。
+                try:
+                    if not win.events._pywebviewready.is_set():
+                        continue
+                except Exception:
+                    pass
                 try:
                     win.evaluate_js(js)
                 except Exception:

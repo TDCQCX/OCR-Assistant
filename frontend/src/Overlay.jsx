@@ -98,8 +98,12 @@ export default function Overlay() {
         const holeW = ev.config?.window?.holeWidth
         const holeH = ev.config?.window?.holeHeight
         if (ev.applyHole && holeW && holeH) {
-          setSize({ w: holeW, h: holeH })
-          wantHoleRef.current = { w: holeW, h: holeH }
+          // holeWidth/holeHeight 存的是物理像素,而输入框与 resize_main 用的是 CSS 像素
+          const k = window.devicePixelRatio || 1
+          const cssW = Math.round(holeW / k)
+          const cssH = Math.round(holeH / k)
+          setSize({ w: cssW, h: cssH })
+          wantHoleRef.current = { w: cssW, h: cssH }
           triesRef.current = 0
           setTimeout(() => reportRef.current(), 60)
         }
