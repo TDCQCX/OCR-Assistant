@@ -77,10 +77,12 @@ function ModelPage() {
     setIdx(n)
     loadForm(n)
   }
+  const [hints, setHints] = useState({})
   const loadForm = async (i) => {
     const f = await call('provider_get', i)
     setForm(f.provider)
     setPreview(f.preview)
+    setHints(f.hints || {})
   }
   useEffect(() => { reload() }, [])
 
@@ -190,7 +192,7 @@ function ModelPage() {
         </Card>
 
         <div className="space-y-2">
-          <Field label="API Key">
+          <Field label="API Key" hint={hints.key || '在所选平台的控制台申请'}>
             <div className="relative">
               <input
                 className="ctl pr-9"
@@ -205,12 +207,25 @@ function ModelPage() {
               </span>
             </div>
           </Field>
-          <Field label="模型 ID">
-            <input className="ctl" value={form.model || ''} placeholder="例如 qwen3.7-flash-2026-07-15 / gpt-4o-mini"
+          <Field label="模型 ID" hint={hints.model || '必须是平台控制台里的准确模型名'}>
+            <input className="ctl" value={form.model || ''}
+                   placeholder={hints.model ? hints.model.split('常用:')[1]?.split('(')[0] : '例如 gpt-4o-mini'}
                    onChange={(e) => patch('model', e.target.value)} />
           </Field>
-          <Field label="Base URL">
-            <input className="ctl" value={form.base_url || ''} onChange={(e) => patch('base_url', e.target.value)} />
+          <Field label="Base URL" hint={hints.base || '填到 /v1 即可,程序会自动补 /chat/completions'}>
+            <div className="flex gap-2">
+              <input className="ctl" value={form.base_url || ''}
+                     placeholder="例如 https://api.deepseek.com/v1"
+                     onChange={(e) => patch('base_url', e.target.value)} />
+              <Btn onClick={async () => {
+                await call('reset_provider_defaults', idx)
+                await loadForm(idx)
+                toast('已恢复默认地址')
+              }}>恢复默认</Btn>
+            </div>
+            {hints.default_base && (
+              <div className="hint mt-1">预设地址:{hints.default_base}</div>
+            )}
           </Field>
           <Field label="官网链接">
             <div className="flex gap-2">
@@ -236,9 +251,15 @@ function ModelPage() {
         <div className="fixed inset-0 bg-black/40 grid place-items-center z-50" onClick={() => setTplOpen(false)}>
           <div className="w-[680px] max-h-[80vh] card p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
             <div className="font-bold">JSON 请求模板</div>
-            <p className="hint">占位符 {'{model}'} / {'{prompt}'} / {'{image_url}'} 会自动替换为 JSON 值(勿加引号);enable_thinking 由平台开关注入。</p>
+            <p className="hint">
+              占位符 {'{model}'} / {'{prompt}'} / {'{image_url}'} 会自动替换为 JSON 值(勿给占位符加引号)。
+              <br />
+              `enable_thinking` 仅对支持的平台(百炼/DashScope)生效,其余平台会自动从请求体移除,避免个别网关返回 400。
+              模板必须是合法 JSON;修改后点保存会先校验格式。若改坏了可点「恢复默认模板」。
+            </p>
             <textarea className="ctl h-72 font-mono text-[12px]" value={tpl} onChange={(e) => setTpl(e.target.value)} />
             <div className="flex justify-end gap-2">
+              <Btn onClick={async () => { setTpl(await call('reset_template')); toast('已恢复默认模板') }}>恢复默认模板</Btn>
               <Btn onClick={() => setTplOpen(false)}>取消</Btn>
               <Btn primary onClick={async () => {
                 const r = await call('set_template', tpl)

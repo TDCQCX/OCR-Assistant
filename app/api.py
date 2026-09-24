@@ -101,8 +101,38 @@ class Api:
         cfg = self.app.cfg
         provs = cfg.get("providers", [])
         if not (0 <= int(i) < len(provs)):
-            return {"provider": {}, "preview": ""}
-        return {"provider": provs[int(i)], "preview": self.provider_preview(i)}
+            return {"provider": {}, "preview": "", "hints": {}}
+        prov = provs[int(i)]
+        hints = dict(cfgmod.PROVIDER_HINTS.get(str(prov.get("id", "")), {}))
+        preset = next((p for p in cfgmod.PROVIDER_PRESETS if p.get("id") == prov.get("id")), None)
+        if preset:
+            hints["default_base"] = preset.get("base_url", "")
+            hints["default_model"] = preset.get("model", "")
+        hints["supports_thinking"] = str(prov.get("id", "")) in cfgmod.THINKING_PROVIDER_IDS
+        return {"provider": prov, "preview": self.provider_preview(i), "hints": hints}
+
+    def reset_provider_defaults(self, i: int) -> bool:
+        """把某个平台的 Base URL / 模型还原为预设默认值(用户改坏地址后一键恢复)。"""
+        cfg = self.app.cfg
+        provs = cfg.get("providers", [])
+        if not (0 <= int(i) < len(provs)):
+            return False
+        prov = provs[int(i)]
+        preset = next((p for p in cfgmod.PROVIDER_PRESETS if p.get("id") == prov.get("id")), None)
+        if not preset:
+            return False
+        prov["base_url"] = preset.get("base_url", "")
+        if not (prov.get("model") or "").strip():
+            prov["model"] = preset.get("model", "")
+        cfgmod.save_config(cfg)
+        self.app.push({"type": "config", "config": cfg})
+        return True
+
+    def reset_template(self) -> str:
+        """把 JSON 请求模板还原为默认模板。"""
+        self.app.cfg["request_template"] = cfgmod.DEFAULT_REQUEST_TEMPLATE
+        cfgmod.save_config(self.app.cfg)
+        return cfgmod.DEFAULT_REQUEST_TEMPLATE
 
     def provider_set(self, i: int, field: str, value) -> bool:
         cfg = self.app.cfg

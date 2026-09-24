@@ -52,7 +52,8 @@ class AgentClient:
     def __init__(self, api_key: str, model: str, api_base: str,
                  request_template: str = "", timeout: int = 180,
                  max_side: int = 2048, max_retries: int = 3,
-                 backoff: float = 0.8, enable_thinking: bool = False):
+                 backoff: float = 0.8, enable_thinking: bool = False,
+                 supports_thinking: bool = False):
         self.api_key = (api_key or "").strip()
         self.model = (model or "").strip()
         self.api_base = chat_endpoint(api_base)
@@ -62,6 +63,7 @@ class AgentClient:
         self.max_retries = max(1, max_retries)
         self.backoff = backoff
         self.enable_thinking = enable_thinking
+        self.supports_thinking = supports_thinking
 
     def _encode_image(self, image: bytes) -> str:
         """PNG 字节 -> base64;长边超过 max_side 时等比压缩,防止接口拒绝。"""
@@ -85,12 +87,17 @@ class AgentClient:
             .replace("{prompt}", json.dumps(prompt, ensure_ascii=False))
             .replace("{image_url}", json.dumps(image_url))
         )
-        # 按平台的「是否开启思考」注入
-        body = re.sub(
-            r'"enable_thinking"\s*:\s*(true|false)',
-            f'"enable_thinking": {str(bool(self.enable_thinking)).lower()}',
-            body,
-        )
+        if self.supports_thinking:
+            # 支持的平台(如百炼/DashScope):按平台开关注入
+            body = re.sub(
+                r'"enable_thinking"\s*:\s*(true|false)',
+                f'"enable_thinking": {str(bool(self.enable_thinking)).lower()}',
+                body,
+            )
+        else:
+            # 不支持的平台:从请求体移除该字段,避免部分网关返回 400
+            body = re.sub(r',?\s*"enable_thinking"\s*:\s*(true|false)', "", body)
+            body = re.sub(r'"enable_thinking"\s*:\s*(true|false)\s*,?', "", body)
         try:
             return json.loads(body)
         except Exception as exc:

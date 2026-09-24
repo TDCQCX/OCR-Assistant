@@ -716,6 +716,7 @@ class App:
                 max_retries=int(self.cfg["retry"].get("max_retries", 3)),
                 backoff=float(self.cfg["retry"].get("backoff", 0.8)),
                 enable_thinking=bool(prov.get("enable_thinking", False)),
+                supports_thinking=str(prov.get("id", "")) in cfgmod.THINKING_PROVIDER_IDS,
             )
             prompts = self.cfg.get("prompts", {})
             from app.worker import PipelineWorker
