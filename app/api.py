@@ -127,6 +127,14 @@ class Api:
         cfgmod.save_config(self.app.cfg)
         return cfgmod.DEFAULT_REQUEST_TEMPLATE
 
+    def reset_window_sizes(self) -> dict:
+        """把悬浮窗/迷你条/翻译窗的尺寸全部恢复为默认值。"""
+        return self.app.reset_window_sizes()
+
+    def set_mini_height(self, h) -> bool:
+        """前端上报迷你条内容自然高度,由后端锁定窗口高度。"""
+        return self.app.set_mini_height(h)
+
     def provider_set(self, i: int, field: str, value) -> bool:
         cfg = self.app.cfg
         provs = cfg.get("providers", [])

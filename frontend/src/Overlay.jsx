@@ -15,7 +15,7 @@ const MODES = [
 
 export default function Overlay() {
   const app = useApp()
-  const { cfg, status, result, busy } = app
+  const { cfg, status, result, busy, setStatus } = app
   const toast = useToast()
   const dl = useDownloader()
   const holeRef = useRef(null)

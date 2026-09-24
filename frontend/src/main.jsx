@@ -46,6 +46,13 @@ function App() {
     return () => { delete window.__ocrEvent }
   }, [])
 
+  // 跨窗口同步:任一模式改了提问内容,通过 config 广播让其它模式(独立网页上下文)同步
+  useEffect(() => {
+    const remote = cfg?.behavior?.current_question
+    if (typeof remote === 'string' && remote !== question) setQuestionRaw(remote)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg?.behavior?.current_question])
+
   // 主题应用(带上 ui.panelOpacity 等附加项)
   useEffect(() => { if (cfg) applyTheme(resolveTheme(cfg.ui), cfg.ui) }, [cfg])
 

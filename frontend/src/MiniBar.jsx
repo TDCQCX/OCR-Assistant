@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
 import { EngineSwitch, Icon, IconBtn, IconSeg, QBox, ResizeHandles, Tip, useWindowDrag } from './ui'
@@ -19,6 +19,21 @@ export default function MiniBar() {
   const tone = { idle: 'var(--c-ok)', working: 'var(--c-warn)', ok: 'var(--c-ok)', danger: 'var(--c-danger)' }[status.tone] || 'var(--c-muted)'
   const preview = result?.error ? `失败:${result.error}` : result?.answer || status.text
 
+  // 高度锁定:把内容自然高度上报后端,由后端锁定窗口高度。
+  // 否则字号/主题变大后第二行会被裁掉,或窗口高度被拉伸后无法还原。
+  const rootRef = useRef(null)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const report = () => {
+      const need = Math.round(el.scrollHeight + 2)   // +2 = 上下边框
+      if (need > 0 && need !== cfg.window?.miniHeight) call('set_mini_height', need)
+    }
+    report()
+    const t = setTimeout(report, 120)                // 字体/图标异步加载后再校正一次
+    return () => clearTimeout(t)
+  }, [cfg.ui?.fontSize, cfg.ui?.radius, cfg.window?.miniHeight, preview])
+
   const toggleOcr = async (cloud) => {
     await call('set_config_value', 'ocr.mode', cloud ? 'cloud' : 'local')
     await app.reload()
@@ -26,6 +41,7 @@ export default function MiniBar() {
 
   return (
     <div
+      ref={rootRef}
       className="h-full w-full flex flex-col rounded-card border border-line overflow-hidden relative"
       style={{ background: 'var(--c-panel)', boxShadow: 'var(--c-shadow)' }}
     >
@@ -33,7 +49,7 @@ export default function MiniBar() {
       {/* 迷你条高度固定:只允许左右拉伸(超过阈值会自动切回悬浮窗) */}
       <ResizeHandles which="mini" edges={['w', 'e']} />
       {/* 第一行:图标工具栏 */}
-      <div className="flex items-center gap-2 px-2 h-[38px] drag-handle" {...drag}>
+      <div className="shrink-0 flex items-center gap-2 px-2 h-[38px] drag-handle" {...drag}>
         <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag" title="OCR 助手">O</span>
         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tone }} />
         <span className="truncate text-[12px] text-muted flex-1 min-w-0">{preview}</span>
@@ -47,7 +63,7 @@ export default function MiniBar() {
       </div>
 
       {/* 第二行:提问预输入 */}
-      <div className="flex items-center gap-2 px-2 pb-2 pt-0.5">
+      <div className="shrink-0 flex items-center gap-2 px-2 pb-2 pt-0.5">
         <Tip text="提问/指令(自输入会自动记住)">
           <span className="text-muted"><Icon name="edit" size={14} /></span>
         </Tip>

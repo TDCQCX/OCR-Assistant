@@ -166,8 +166,9 @@ DEFAULT_CONFIG = {
         "translate_y": None,
         "translate_on_top": False,
         # 各模式"恢复默认尺寸"用(与用户当前尺寸分离,便于切换模式时回到默认大小)
+        # 迷你条高度是「内容决定」的:实际值由前端实测后写入 miniHeight,这里只是兜底值
         "defaultWidth": 640, "defaultHeight": 680,
-        "defaultMiniWidth": 420, "defaultMiniHeight": 78,
+        "defaultMiniWidth": 420, "defaultMiniHeight": 94,
         "defaultTranslateWidth": 760, "defaultTranslateHeight": 620,     # 翻译窗口默认不置顶(避免遮挡待翻译内容)
         "holeWidth": None,             # 洞口(OCR 区域)尺寸
         "holeHeight": None,

@@ -59,8 +59,13 @@ class App:
     def start(self):
         self._create_windows()
         self._register_hotkeys()
-        # Qt(WebEngine)后端:透明/无边框/置顶/拖拽均支持
-        webview.start(self._bootstrap, gui="qt", debug=False, private_mode=False)
+        # Qt(WebEngine)后端:透明/无边框/置顶/拖拽均支持。
+        # private_mode 必须为 True:pywebview 的 Qt 后端在 private_mode=False 时会为
+        # 每个窗口创建一个同名(pywebview)持久化 QWebEngineProfile,多个窗口争抢同一份
+        # 磁盘缓存/LevelDB 目录,导致除第一个之外所有窗口的页面都加载不出来
+        # (表现为全屏空白、启动极慢)。本程序的设置都存在 config.json,不依赖
+        # 浏览器级别的 cookie/localStorage,因此用无痕配置是安全的。
+        webview.start(self._bootstrap, gui="qt", debug=False, private_mode=True)
 
     def _bootstrap(self):
         """启动后校正窗口可见性,并按模式摆好位置。"""
@@ -90,8 +95,9 @@ class App:
                 except Exception:
                     pass
             try:
-                self.settings.hide()
-                self.snip.hide()
+                for extra in (self.settings, self.snip):
+                    if extra is not None:
+                        extra.hide()
             except Exception:
                 pass
             if mode == "mini":
@@ -123,7 +129,10 @@ class App:
         w = int(cfg["window"].get("width", 640))
         h = int(cfg["window"].get("height", 680))
         mw = int(cfg["window"].get("miniWidth", 420))
-        mh = int(cfg["window"].get("miniHeight", 78))
+        # 高度恒定:优先用前端上次实测并写入的 miniHeight,兜底用默认值。
+        # 历史版本可能把被拉伸的高度写进了 miniHeight,前端挂载后会立刻校正回来。
+        mh = int(cfg["window"].get("miniHeight") or cfg["window"].get("defaultMiniHeight") or 94)
+        cfg["window"]["miniHeight"] = mh
         tw = int(cfg["window"].get("translateWidth", 760))
         th = int(cfg["window"].get("translateHeight", 620))
         on_top = bool(cfg["window"].get("always_on_top", True))
@@ -138,6 +147,9 @@ class App:
             "OCR 助手", _url("mini"), js_api=api, width=mw, height=mh,
             frameless=True, easy_drag=False, on_top=on_top, transparent=True,
             hidden=mode != "mini",
+            # pywebview 默认 min_size=(200,100) 会把迷你条顶到 100px,导致高度「还原不了」;
+            # 这里显式放宽下限,高度由前端实测的自然高度锁定(见 set_mini_height)。
+            min_size=(320, 56),
         )
         tx, ty = cfg["window"].get("translate_x"), cfg["window"].get("translate_y")
         # 翻译窗口不透明(避免遮挡/看不清内容),默认不置顶
@@ -148,34 +160,79 @@ class App:
             transparent=False, hidden=mode != "translate", text_select=True,
             **({"x": int(tx), "y": int(ty)} if tx is not None and ty is not None else {}),
         )
-        self.settings = webview.create_window(
-            "设置 - OCR 助手", _url("settings"), js_api=api, width=1000, height=700,
-            min_size=(900, 600), resizable=True, hidden=True,
-        )
-        vs = virtual_screen()
-        self.snip = webview.create_window(
-            "选择区域", _snip_url(), js_api=api, x=vs["left"], y=vs["top"],
-            width=vs["width"], height=vs["height"], frameless=True, on_top=True,
-            transparent=True, hidden=True, easy_drag=False,
-        )
+        # 设置窗口与框选窗口「按需创建」:每个 WebEngine 窗口都要占一个渲染进程
+        # (实测约 65MB),启动时就创建 5 个会让内存和启动时间都明显变差。
+        self.settings = None
+        self.snip = None
         # 只有"当前模式的窗口"被关闭才退出程序;其它(隐藏的)窗口被关闭不应影响运行
         self.overlay.events.closed += lambda: self._on_window_closed("overlay")
         self.mini.events.closed += lambda: self._on_window_closed("mini")
         self.translate.events.closed += lambda: self._on_window_closed("translate")
-        self.settings.events.closed += self._on_settings_closed
-        self.snip.events.closed += self._on_snip_closed
         for win in (self.overlay, self.mini, self.translate):
             try:
                 win.events.loaded += self._on_window_loaded
             except Exception:
                 pass
 
+    def _screen_scale(self) -> float:
+        """当前屏幕缩放比(200% 缩放 → 2.0)。"""
+        try:
+            from PySide6.QtGui import QGuiApplication
+            s = QGuiApplication.primaryScreen()
+            if s is not None:
+                dpr = float(s.devicePixelRatio() or 1.0)
+                if dpr > 0:
+                    return dpr
+        except Exception:
+            pass
+        return 1.0
+
+    def _snip_geometry(self) -> dict:
+        """框选窗口几何:virtual_screen 给的是物理像素,而 Qt 窗口用逻辑像素。
+
+        高 DPI(200%)下如果不除以缩放比,窗口会变成屏幕的 2 倍宽高 = 4 倍面积,
+        透明全屏窗口的内存会从 ~170MB 涨到 ~690MB(实测)。
+        """
+        vs = virtual_screen()
+        k = self._screen_scale()
+        return {
+            "left": int(round(vs["left"] / k)),
+            "top": int(round(vs["top"] / k)),
+            "width": max(320, int(round(vs["width"] / k))),
+            "height": max(240, int(round(vs["height"] / k))),
+        }
+
+    def _ensure_settings(self):
+        """按需创建设置窗口(首次打开设置时)。"""
+        if self.settings is None:
+            self.settings = webview.create_window(
+                "设置 - OCR 助手", _url("settings"), js_api=self.api, width=1000, height=700,
+                min_size=(900, 600), resizable=True, hidden=True,
+            )
+            self.settings.events.closed += self._on_settings_closed
+        return self.settings
+
+    def _ensure_snip(self):
+        """按需创建框选窗口(全屏透明遮罩,首次框选时)。"""
+        if self.snip is None:
+            g = self._snip_geometry()
+            self.snip = webview.create_window(
+                "选择区域", _snip_url(), js_api=self.api, x=g["left"], y=g["top"],
+                width=g["width"], height=g["height"], frameless=True, on_top=True,
+                transparent=True, hidden=True, easy_drag=False,
+            )
+            self.snip.events.closed += self._on_snip_closed
+        return self.snip
+
     def _on_settings_closed(self):
+        # 用户关掉设置窗口后释放引用,下次打开设置时重新按需创建
+        self.settings = None
         self.cfg = cfgmod.load_config()
         self.push({"type": "config", "config": self.cfg})
 
     def _on_snip_closed(self):
-        pass
+        # 框选窗口被关闭(例如窗口管理器强关)后置空,下次框选重新创建
+        self.snip = None
 
     # ================= 事件推送 =================
     def push(self, payload: dict):
@@ -192,40 +249,54 @@ class App:
         if mode == self.cfg.get("mode") and mode != "snip":
             return
         prev = self.cfg.get("mode") or "overlay"
+        fresh_snip = False
+        if mode == "snip" and self.snip is None:
+            self._ensure_snip()
+            fresh_snip = True
 
         def do():
             overlay, mini, translate, snip = self.overlay, self.mini, self.translate, self.snip
+
+            def hide_all():
+                for w in (overlay, mini, translate, snip):
+                    if w is not None:
+                        try:
+                            w.hide()
+                        except Exception:
+                            pass
+
             if mode == "snip":
                 if prev != "snip":
                     self._prev_mode = prev
-                overlay.hide()
-                mini.hide()
-                translate.hide()
-                snip.show()
+                hide_all()
+                if snip is not None:
+                    snip.show()
             elif mode == "mini":
-                snip.hide()
-                overlay.hide()
-                translate.hide()
+                hide_all()
                 mini.show()
                 self._restore_default_size("mini")
                 self._place_mini_default()
             elif mode == "translate":
-                snip.hide()
-                overlay.hide()
-                mini.hide()
+                hide_all()
                 translate.show()
                 self._restore_default_size("translate")
                 self._place_translate_default()
             else:
-                snip.hide()
-                mini.hide()
-                translate.hide()
+                hide_all()
                 overlay.show()
                 self._restore_default_size("overlay")
             self.cfg["mode"] = mode
             cfgmod.save_config(self.cfg)
 
         run_in_main(do)
+        if fresh_snip:
+            # 按需创建的框选窗口由 Qt 异步建好,稍后再显示(此时 snip 对象才真正可用)
+            def show_snip_later():
+                time.sleep(0.7)
+                win = self.snip
+                if win is not None:
+                    run_in_main(lambda: win.show())
+            threading.Thread(target=show_snip_later, daemon=True).start()
         if self._last_result:
             def replay():
                 time.sleep(1.6)
@@ -241,6 +312,82 @@ class App:
             except Exception:
                 pass
         self.push({"type": "config", "config": self.cfg})
+
+    # ================= 模式尺寸(各模式互相独立) =================
+    def _restore_default_size(self, mode: str):
+        """进入某个模式时,把该模式窗口恢复成「它自己」的尺寸。
+
+        各模式的尺寸分别存放在 window.width/height(悬浮窗)、window.miniWidth/miniHeight
+        (迷你条)、window.translateWidth/translateHeight(翻译窗)三组键里,互不干扰;
+        这样在迷你条里拉伸/拖动不会污染悬浮窗尺寸,切回原模式也能拿回原来的大小。
+        迷你条高度恒定,永远按 defaultMiniHeight 校正。
+        """
+        win_cfg = self.cfg.get("window") or {}
+        if mode == "mini":
+            win = self.mini
+            w = max(320, int(win_cfg.get("miniWidth", 420)))
+            # 高度用前端实测并锁定的 miniHeight(随字号/主题自适应),没有则退回默认值
+            h = max(56, int(win_cfg.get("miniHeight") or win_cfg.get("defaultMiniHeight", 78)))
+        elif mode == "translate":
+            win = self.translate
+            w = max(480, int(win_cfg.get("translateWidth", 760)))
+            h = max(360, int(win_cfg.get("translateHeight", 620)))
+        elif mode == "overlay":
+            win = self.overlay
+            w = max(360, int(win_cfg.get("width", 640)))
+            h = max(260, int(win_cfg.get("height", 680)))
+        else:
+            return
+        if win is None:
+            return
+        try:
+            if (int(win.width), int(win.height)) != (w, h):
+                win.resize(w, h)
+        except Exception:
+            pass
+
+    def reset_window_sizes(self) -> dict:
+        """把所有模式的窗口尺寸恢复成默认值(供设置页「恢复默认尺寸」使用)。"""
+        win_cfg = self.cfg.setdefault("window", {})
+        win_cfg["width"] = int(win_cfg.get("defaultWidth", 640))
+        win_cfg["height"] = int(win_cfg.get("defaultHeight", 680))
+        win_cfg["miniWidth"] = int(win_cfg.get("defaultMiniWidth", 420))
+        # 迷你条高度不在这里重置:它由前端实测内容高度后锁定(随字号/主题自适应)
+        win_cfg["translateWidth"] = int(win_cfg.get("defaultTranslateWidth", 760))
+        win_cfg["translateHeight"] = int(win_cfg.get("defaultTranslateHeight", 620))
+        cfgmod.save_config(self.cfg)
+
+        def do():
+            for m in ("overlay", "mini", "translate"):
+                self._restore_default_size(m)
+
+        run_in_main(do)
+        self.push({"type": "config", "config": self.cfg})
+        return dict(win_cfg)
+
+    def set_mini_height(self, h) -> bool:
+        """锁定迷你条高度为前端实测的自然高度(字号/主题/内容变化时由前端上报)。
+
+        迷你条不允许上下拉伸,高度必须由内容决定;写死在配置里的固定值会在
+        用户放大字号后把第二行(提问输入)裁掉。
+        """
+        try:
+            want = int(round(float(h)))
+        except Exception:
+            return False
+        want = max(56, min(240, want))
+        win_cfg = self.cfg.setdefault("window", {})
+        if int(win_cfg.get("miniHeight") or 0) != want:
+            win_cfg["miniHeight"] = want
+            cfgmod.save_config(self.cfg)
+        if self.mini is None:
+            return True
+        try:
+            if int(self.mini.height) != want:
+                run_in_main(lambda: self.mini.resize(int(self.mini.width), want))
+        except Exception:
+            pass
+        return True
 
     # ================= 迷你条默认位置(任务栏上方居中) =================
     def _place_mini_default(self):
@@ -512,9 +659,19 @@ class App:
 
     # ================= 设置窗口 =================
     def open_settings(self):
-        run_in_main(lambda: self.settings.show())
+        win = self._ensure_settings()
+
+        def do():
+            try:
+                win.show()
+            except Exception:
+                pass
+
+        run_in_main(do)
 
     def close_settings(self):
+        if self.settings is None:
+            return
         run_in_main(lambda: self.settings.hide())
 
     # ================= 自由截图 =================
@@ -535,7 +692,8 @@ class App:
         w = int(sel["w"] * dpr)
         h = int(sel["h"] * dpr)
 
-        run_in_main(lambda: self.snip.hide())
+        if self.snip is not None:
+            run_in_main(lambda: self.snip.hide())
         time.sleep(max(0.06, int(self.cfg["capture"].get("flash_delay_ms", 80)) / 1000.0 + 0.05))
         try:
             png = grab_region(left, top, w, h)
@@ -554,9 +712,12 @@ class App:
             self.push({"type": "config", "config": self.cfg, "applyHole": True})
 
             def do():
-                self.snip.hide()
-                self.mini.hide()
-                self.translate.hide()
+                for w in (self.snip, self.mini, self.translate):
+                    if w is not None:
+                        try:
+                            w.hide()
+                        except Exception:
+                            pass
                 self.overlay.show()
 
             run_in_main(do)

@@ -546,6 +546,7 @@ function AppearancePage() {
   const app = useApp()
   const toast = useToast()
   const ui = app.cfg.ui || {}
+  const winCfg = app.cfg.window || {}
   const [draft, setDraft] = useState(ui.customTheme || resolveTheme(ui))
 
   const setUi = (patch) => {
@@ -642,6 +643,19 @@ function AppearancePage() {
               <input type="range" min="60" max="100" value={ui.panelOpacity ?? 96}
                      onChange={(e) => setUi({ panelOpacity: +e.target.value })} className="flex-1" />
               <span className="hint w-10 text-right">{ui.panelOpacity ?? 96}%</span>
+            </div>
+          </Field>
+          <Field label="窗口尺寸" hint="各模式尺寸互相独立;迷你条高度恒定">
+            <div className="flex items-center gap-2">
+              <Btn onClick={async () => {
+                await call('reset_window_sizes')
+                toast('已恢复三个模式的默认尺寸')
+              }}>恢复默认尺寸</Btn>
+              <span className="hint">
+                悬浮窗 {winCfg.defaultWidth ?? 640}x{winCfg.defaultHeight ?? 680}
+                ,迷你条 {winCfg.defaultMiniWidth ?? 420}x{winCfg.defaultMiniHeight ?? 78}
+                ,翻译窗 {winCfg.defaultTranslateWidth ?? 760}x{winCfg.defaultTranslateHeight ?? 620}
+              </span>
             </div>
           </Field>
         </div>
