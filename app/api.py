@@ -102,14 +102,7 @@ class Api:
         provs = cfg.get("providers", [])
         if not (0 <= int(i) < len(provs)):
             return {"provider": {}, "preview": "", "hints": {}}
-        prov = provs[int(i)]
-        hints = dict(cfgmod.PROVIDER_HINTS.get(str(prov.get("id", "")), {}))
-        preset = next((p for p in cfgmod.PROVIDER_PRESETS if p.get("id") == prov.get("id")), None)
-        if preset:
-            hints["default_base"] = preset.get("base_url", "")
-            hints["default_model"] = preset.get("model", "")
-        hints["supports_thinking"] = str(prov.get("id", "")) in cfgmod.THINKING_PROVIDER_IDS
-        return {"provider": prov, "preview": self.provider_preview(i), "hints": hints}
+        return {"provider": provs[int(i)], "preview": self.provider_preview(i)}
 
     def reset_provider_defaults(self, i: int) -> bool:
         """把某个平台的 Base URL / 模型还原为预设默认值(用户改坏地址后一键恢复)。"""
@@ -469,11 +462,16 @@ class Api:
             on = bool(on)
 
             def do():
-                try:
-                    self.app.overlay.on_top = on
-                    self.app.mini.on_top = on
-                except Exception:
-                    pass
+                for win in (self.app.overlay, self.app.mini, self.app.translate):
+                    try:
+                        if win is not None:
+                            win.on_top = on
+                    except Exception:
+                        pass
+                # pywebview 的 on_set_on_top 内部会无条件 show() 窗口,
+                # 会把隐藏的模式窗口也显示出来(表现为两个模式界面同时出现),
+                # 因此设置完标志位后立即按当前模式重新校正可见性。
+                self.app._sync_visibility()
 
             run_in_main(do)
             self.app.cfg["window"]["always_on_top"] = on

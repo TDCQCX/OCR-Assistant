@@ -158,9 +158,10 @@ class App:
             width=vs["width"], height=vs["height"], frameless=True, on_top=True,
             transparent=True, hidden=True, easy_drag=False,
         )
-        self.overlay.events.closed += self.quit_app
-        self.mini.events.closed += self.quit_app
-        self.translate.events.closed += self.quit_app
+        # 只有"当前模式的窗口"被关闭才退出程序;其它(隐藏的)窗口被关闭不应影响运行
+        self.overlay.events.closed += lambda: self._on_window_closed("overlay")
+        self.mini.events.closed += lambda: self._on_window_closed("mini")
+        self.translate.events.closed += lambda: self._on_window_closed("translate")
         self.settings.events.closed += self._on_settings_closed
         self.snip.events.closed += self._on_snip_closed
         for win in (self.overlay, self.mini, self.translate):

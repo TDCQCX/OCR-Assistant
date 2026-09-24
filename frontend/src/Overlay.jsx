@@ -22,22 +22,19 @@ export default function Overlay() {
   const dragHeader = useWindowDrag('overlay')
   const dragFooter = useWindowDrag('overlay')
   const [question, setQuestion] = useState(cfg.behavior?.default_question || '请回答识别到的内容')
-  const [providers, setProviders] = useState([])
-  const [active, setActive] = useState(cfg.active_provider)
   const [borderHidden, setBorderHidden] = useState(false)
   const [size, setSize] = useState({ w: cfg.window?.width || 640, h: cfg.window?.height || 680 })
   const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)
   const small = useSmallWindow()
 
   useEffect(() => {
-    call('list_providers').then((p) => { setProviders(p.list || []); setActive(p.active) })
     call('last_result').then((r) => { if (r && (r.answer || r.ocr_text)) app.setResult(r) })
   }, [])
 
-  // 顶部只显示当前模型与状态(点击进入设置切换)
-  const curProv = providers.find((p) => p.id === active) || {}
+  // 顶部只显示当前模型与状态:直接由 cfg 派生,设置窗口改动后会随 config 事件立即刷新
+  const curProv = (cfg.providers || []).find((p) => p.id === cfg.active_provider) || {}
   const modelName = curProv.model || curProv.name || '未选择模型'
-  const modelReady = !!curProv.ready
+  const modelReady = !!(curProv.api_key || '').trim()
 
   // 把洞口(OCR 区域)几何上报后端,用于把该区域从窗口"输入/绘制区域"中挖掉 → 鼠标可穿透
   const reportRef = useRef(() => {})
@@ -161,6 +158,15 @@ export default function Overlay() {
     const ok = await call('copy_text', text)
     toast(ok ? '已复制回答' : '复制失败', ok ? 'ok' : 'danger')
   }
+
+  // Key 配置状态随 cfg 变化:在设置里填好 Key 并关闭后,主界面状态立即变为"已配置"
+  useEffect(() => {
+    if (status.tone === 'working' || status.tone === 'danger') return
+    setStatus({
+      text: modelReady ? '就绪 · Key 已配置' : '就绪 · Key 未配置',
+      tone: modelReady ? 'idle' : 'warn',
+    })
+  }, [modelReady])
 
   const modeTone = { idle: 'ok', working: 'warn', ok: 'ok', danger: 'danger' }[status.tone] || 'muted'
 

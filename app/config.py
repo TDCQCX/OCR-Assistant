@@ -237,39 +237,6 @@ LANG_CODES = {
 
 
 
-# 各平台填写提示(界面展示,不写入 config.json,老配置也能直接受益)
-PROVIDER_HINTS = {
-    "bailian": {
-        "base": "官方完整接口地址。也可以只填 https://dashscope.aliyuncs.com/compatible-mode/v1,程序会自动补 /chat/completions",
-        "model": "常用:qwen-plus / qwen-max / qwen3.7-flash-2026-07-15(以控制台为准)",
-        "key": "百炼控制台 → API-KEY 管理",
-    },
-    "openai": {
-        "base": "填到 /v1 即可(程序自动补 /chat/completions);国内网络通常需要代理",
-        "model": "常用:gpt-4o-mini / gpt-4o / gpt-4.1-mini",
-        "key": "platform.openai.com → API keys",
-    },
-    "deepseek": {
-        "base": "推荐只填 https://api.deepseek.com/v1(或 https://api.deepseek.com),程序自动补 /chat/completions",
-        "model": "常用:deepseek-chat(对话)、deepseek-reasoner(推理)",
-        "key": "platform.deepseek.com → API keys",
-    },
-    "zhipu": {
-        "base": "填到 /api/paas/v4 即可,程序自动补 /chat/completions",
-        "model": "常用:glm-4-flash(免费额度)、glm-4-plus、glm-4-air",
-        "key": "open.bigmodel.cn → API Keys",
-    },
-    "moonshot": {
-        "base": "填到 /v1 即可,程序自动补 /chat/completions",
-        "model": "常用:moonshot-v1-8k / moonshot-v1-32k / kimi-k2-0905-preview",
-        "key": "platform.moonshot.cn → API Key 管理",
-    },
-    "ollama": {
-        "base": "本机 Ollama 默认 http://localhost:11434/v1(程序自动补 /chat/completions);Key 随便填(如 ollama)",
-        "model": "填本机已拉取的模型名,例如 qwen2.5:7b、llama3.1:8b(用 ollama list 查看)",
-        "key": "本地服务不需要真实 Key",
-    },
-}
 
 # 开启思考参数只对支持的平台注入(dashscope/百炼);其余平台会自动从请求体移除,避免 400
 THINKING_PROVIDER_IDS = ("bailian",)
