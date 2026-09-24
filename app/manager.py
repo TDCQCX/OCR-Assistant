@@ -50,6 +50,8 @@ class App:
         self._last_result = {}
         self._auto_thread = None
         self._auto_stop = threading.Event()
+        self._guide_mode = ""
+        self._guide_mini_backup = 0
         # 前端事件统一由独立线程推送:evaluate_js 会阻塞等待 JS 结果,
         # 若在 Qt 主线程调用会死锁(界面无响应),因此必须走非 GUI 线程。
         self._push_q = queue.Queue(maxsize=128)
@@ -76,6 +78,9 @@ class App:
             pass
         time.sleep(1.5)
         self._sync_visibility()
+        # 首次启动时,当前模式也该看到引导(尽早触发,不必等第二次可见性校正)
+        start_mode = self.cfg.get("mode") if self.cfg.get("mode") in ("overlay", "mini", "translate") else "overlay"
+        self.maybe_guide(start_mode, delay=0.5)
         time.sleep(3)
         self._sync_visibility()
 
@@ -319,6 +324,8 @@ class App:
             except Exception:
                 pass
         self.push({"type": "config", "config": self.cfg})
+        # 首次进入该模式 → 自动开始新手引导(窗口已显示,气泡才看得见)
+        self.maybe_guide(mode, delay=1.1 if mode == "snip" else 0.9)
 
     # ================= 模式尺寸(各模式互相独立) =================
     def _restore_default_size(self, mode: str):
@@ -383,6 +390,9 @@ class App:
         except Exception:
             return False
         want = max(56, min(240, want))
+        # 教程进行中迷你条被临时加高,此时忽略前端上报,避免气泡被立刻挤掉
+        if self._guide_mode == "mini" and int(self.mini.height if self.mini else 0) > want:
+            return True
         win_cfg = self.cfg.setdefault("window", {})
         if int(win_cfg.get("miniHeight") or 0) != want:
             win_cfg["miniHeight"] = want
@@ -664,6 +674,108 @@ class App:
         except Exception:
             pass
 
+    # ================= 新手教程辅助 =================
+    def guide_begin(self, mode: str) -> bool:
+        """教程开始:给气泡腾出可绘制/可点击的空间。
+
+        - 悬浮窗:洞口区域被 SetWindowRgn 从窗口里挖掉了(鼠标穿透),画在那里的
+          教程气泡既看不到也点不到,因此教程期间先清空窗口区域,结束时再恢复。
+        - 迷你条:窗口只有约 94px 高,放不下气泡,临时加高给气泡留位。
+        """
+        mode = str(mode or "")
+        self._guide_mode = mode
+        if mode == "overlay" and self.overlay is not None:
+            win = self.overlay
+
+            def clear():
+                try:
+                    import ctypes
+                    from ctypes import wintypes
+                    user32 = ctypes.windll.user32
+                    user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HANDLE, wintypes.BOOL]
+                    user32.SetWindowRgn.restype = ctypes.c_int
+                    user32.SetWindowRgn(wintypes.HWND(int(win.native.winId())), None, True)
+                except Exception:
+                    pass
+
+            run_in_main(clear)
+        elif mode == "mini" and self.mini is not None:
+            try:
+                self._guide_mini_backup = int(self.mini.height)
+            except Exception:
+                self._guide_mini_backup = 0
+            want = max(int(self.cfg["window"].get("miniHeight") or 94), self._guide_mini_backup) + 168
+            run_in_main(lambda: self.mini.resize(int(self.mini.width), want))
+        return True
+
+    def guide_end(self, mode: str) -> bool:
+        """教程结束:恢复迷你条高度与悬浮窗的洞口穿透区域。"""
+        mode = str(mode or "")
+        self._guide_mode = ""
+        if mode == "mini" and self.mini is not None:
+            # 教程进行中迷你条被临时加高,不要在这里压回去,否则气泡会被挤掉
+            if self._guide_mode == "mini":
+                return
+            h = int(self.cfg["window"].get("miniHeight") or 94)
+            self._guide_mini_backup = 0
+            run_in_main(lambda: self.mini.resize(int(self.mini.width), h))
+        elif mode == "overlay" and self._hole_key:
+            key = self._hole_key
+            run_in_main(lambda: self._apply_region(*key))
+        return True
+
+    def guide_reset(self) -> dict:
+        """重置"已看过教程"记录(设置页可让所有模式下次重新引导)。"""
+        ui = self.cfg.setdefault("ui", {})
+        ui["guideDone"] = {}
+        cfgmod.save_config(self.cfg)
+        self.push({"type": "config", "config": self.cfg})
+        return dict(ui["guideDone"])
+
+    def _mode_window(self, mode: str):
+        return {"overlay": self.overlay, "mini": self.mini, "translate": self.translate,
+                "settings": self.settings, "snip": self.snip}.get(mode)
+
+    def _wait_window_ready(self, mode: str, timeout: float = 9.0) -> bool:
+        """等目标窗口的页面注入完成(按需窗口可能是刚创建的,早了事件会丢)。"""
+        end = time.time() + timeout
+        while time.time() < end:
+            win = self._mode_window(mode)
+            if win is not None:
+                try:
+                    if win.events._pywebviewready.is_set():
+                        return True
+                except Exception:
+                    pass
+            time.sleep(0.15)
+        return False
+
+    def maybe_guide(self, mode: str, delay: float = 0.9):
+        """首次进入某个模式时自动开始引导(只看当前真正显示的模式窗口)。
+
+        之前由前端在页面挂载时自动开始,但三个模式窗口是启动时就创建好的(隐藏),
+        会在用户看不到的时候就把教程"播放"掉。
+        """
+        mode = str(mode or "")
+        if not mode or (self.cfg.get("ui") or {}).get("guideDone", {}).get(mode):
+            return False
+
+        def later():
+            time.sleep(delay)
+            if (self.cfg.get("ui") or {}).get("guideDone", {}).get(mode):
+                return
+            if not self._wait_window_ready(mode):
+                return
+            try:
+                self.guide_begin(mode)
+                time.sleep(0.25)
+                self.push({"type": "guideStart", "mode": mode})
+            except Exception:
+                pass
+
+        threading.Thread(target=later, daemon=True).start()
+        return True
+
     # ================= 设置窗口 =================
     def open_settings(self):
         win = self._ensure_settings()
@@ -675,11 +787,32 @@ class App:
                 pass
 
         run_in_main(do)
+        self.maybe_guide("settings", delay=1.2)
 
     def close_settings(self):
         if self.settings is None:
             return
-        run_in_main(lambda: self.settings.hide())
+        # 关闭即销毁:设置窗口是重页面(实测常驻约 +170MB),下次打开再按需创建
+        self._destroy_window("settings")
+
+    def _destroy_window(self, which: str) -> bool:
+        """销毁按需创建的窗口(settings / snip),释放其渲染进程与内存。"""
+        win = getattr(self, which, None)
+        if win is None:
+            return False
+
+        def do():
+            try:
+                win.destroy()
+            except Exception:
+                try:
+                    win.hide()
+                except Exception:
+                    pass
+
+        run_in_main(do)
+        setattr(self, which, None)
+        return True
 
     # ================= 自由截图 =================
     def start_snip(self):
@@ -689,6 +822,7 @@ class App:
         back = self._prev_mode if self._prev_mode in ("mini", "overlay", "translate") else \
             (self.cfg.get("mode") if self.cfg.get("mode") in ("mini", "translate") else "overlay")
         self.set_mode(back)
+        self._destroy_window("snip")
 
     def finish_snip(self, sel: dict, action: str = "run", question: str = ""):
         """完成框选:隐藏遮罩 → 抓取区域 → 识别 / 翻译 / 设为悬浮窗区域。"""
@@ -719,7 +853,7 @@ class App:
             self.push({"type": "config", "config": self.cfg, "applyHole": True})
 
             def do():
-                for w in (self.snip, self.mini, self.translate):
+                for w in (self.mini, self.translate):
                     if w is not None:
                         try:
                             w.hide()
@@ -728,6 +862,7 @@ class App:
                 self.overlay.show()
 
             run_in_main(do)
+            self._destroy_window("snip")
             return
 
         # 记住本次框选区域,供翻译模式反复捕获/自动刷新

@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react'
+﻿import React, { useEffect, useState } from 'react'
 import { call } from './bridge'
 import { applyTheme, resolveTheme } from './theme'
+import Guide, { useGuide } from './Guide'
 import { Btn, EngineSwitch, Icon, LangPair, QBox } from './ui'
 
 /** 自由截图模式:全屏遮罩 + 拖拽框选 → 识别 / 翻译 / 设为悬浮窗区域 */
@@ -11,6 +12,7 @@ export default function Snip() {
   const [cfg, setCfg] = useState(null)
   const [langs, setLangs] = useState([])
   const [question, setQuestion] = useState('')
+  const guide = useGuide('snip')
 
   useEffect(() => {
     call('get_state').then((s) => {
@@ -131,6 +133,7 @@ export default function Snip() {
       {!active && (
         <div
           className="absolute left-1/2 -translate-x-1/2 top-8 px-4 py-2 rounded-card border shadow-xl text-center"
+          data-guide="snip-hint"
           style={{ background: 'var(--c-panel)', borderColor: 'var(--c-line)' }}
         >
           <div className="flex items-center justify-center gap-2 font-semibold">
@@ -138,8 +141,15 @@ export default function Snip() {
             自由截图模式
           </div>
           <div className="hint mt-1">按住鼠标左键拖拽框选区域 · 松开后可识别 / 翻译 / 设为悬浮窗区域 · Esc 取消</div>
+          <div className="flex items-center justify-center gap-2 mt-2" data-guide="snip-actions">
+            <span className="chip">识别</span>
+            <span className="chip">翻译此区域</span>
+            <span className="chip">设为悬浮窗区域</span>
+            <span className="chip">Esc 取消</span>
+          </div>
         </div>
       )}
+      <Guide mode="snip" open={guide.open} onClose={guide.stop} />
     </div>
   )
 }

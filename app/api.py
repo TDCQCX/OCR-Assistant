@@ -40,6 +40,24 @@ class Api:
     def __init__(self, app):
         self.app = app
 
+    def __dir__(self):
+        """只把公开的桥接方法暴露给 pywebview。
+
+        pywebview 注入 JS API 时会对 js_api 做 dir() 递归扫描:非可调用且带
+        __module__ 的属性会被继续递归。我们的 Api 持有 App → 模式窗口 → 后端原生
+        控件(WebEngine/.NET)的整张对象图,实测每个窗口要扫 213 个对象 / 1.1 万个属性
+        (21ms),换用 WebView2 后端时更会因 .NET/COM 对象爆栈。这里只返回公开方法名,
+        既去掉这段无用扫描,也让桥接面更明确。
+        """
+        names = []
+        for klass in type(self).__mro__:
+            for name, value in vars(klass).items():
+                if name.startswith("_") or name in names:
+                    continue
+                if callable(value):
+                    names.append(name)
+        return sorted(names)
+
     # ================= 状态 =================
     def get_state(self) -> dict:
         cfg = self.app.cfg
@@ -63,8 +81,33 @@ class Api:
         cfg = self.app.cfg
         _set_path(cfg, path, value)
         cfgmod.save_config(cfg)
+        # 从端侧切回云端时,把常驻的端侧模型释放掉(否则一直占着几百 MB~2.4GB)
+        if str(path) == "translate.mode" and str(value) != "local":
+            self._release_local_models("已切回云端翻译,已释放端侧模型")
+        elif str(path) == "ocr.mode" and str(value) != "local":
+            self._release_local_models("已切回云端识别,已释放端侧模型")
         self.app.push({"type": "config", "config": cfg})
         return True
+
+    def _release_local_models(self, note: str = "") -> int:
+        """释放端侧识别/翻译模型的常驻内存(OCR 侧只有加载日志,不驻留大对象)。"""
+        freed = 0
+        try:
+            from app import local_mt
+            freed = local_mt.release()
+        except Exception:
+            freed = 0
+        if freed and note:
+            self.app.push({"type": "status", "text": note, "tone": "ok"})
+        return freed
+
+    def loaded_local_models(self) -> dict:
+        """当前常驻内存的端侧模型档位(设置页显示/验证用)。"""
+        try:
+            from app import local_mt
+            return {"mt": local_mt.loaded_tiers()}
+        except Exception:
+            return {"mt": []}
 
     def pick_directory(self):
         try:
@@ -134,6 +177,46 @@ class Api:
     def set_mini_height(self, h) -> bool:
         """前端上报迷你条内容自然高度,由后端锁定窗口高度。"""
         return self.app.set_mini_height(h)
+
+    # ================= 新手教程 =================
+    def guide_begin(self, mode: str) -> bool:
+        """教程开始:临时清掉洞口穿透区域 / 给迷你条加高,让气泡可见可点。"""
+        return self.app.guide_begin(str(mode))
+
+    def guide_end(self, mode: str) -> bool:
+        """教程结束:恢复洞口穿透区域与迷你条高度。"""
+        return self.app.guide_end(str(mode))
+
+    def guide_start(self, mode: str) -> bool:
+        """从任意入口(设置页/各模式的「新手教程」按钮)发起某个模式的引导。
+
+        需要先把对应模式的窗口显示出来,再广播 guideStart 事件让该窗口弹出气泡。
+        """
+        mode = str(mode or "")
+        if mode in ("overlay", "mini", "translate", "snip"):
+            self.app.set_mode(mode)
+
+        def later():
+            time.sleep(0.45)   # 等窗口显示/页面就绪
+            self.app.push({"type": "guideStart", "mode": mode})
+
+        threading.Thread(target=later, daemon=True).start()
+        return True
+
+    def guide_done(self, mode: str) -> bool:
+        """标记某个模式的教程已完成(下次进入不再自动弹出)。"""
+        mode = str(mode or "")
+        if not mode:
+            return False
+        ui = self.app.cfg.setdefault("ui", {})
+        done = ui.setdefault("guideDone", {})
+        done[mode] = True
+        cfgmod.save_config(self.app.cfg)
+        return True
+
+    def guide_reset(self) -> dict:
+        """清空所有模式的"已看过教程"记录。"""
+        return self.app.guide_reset()
 
     def provider_set(self, i: int, field: str, value) -> bool:
         cfg = self.app.cfg
@@ -363,6 +446,15 @@ class Api:
             local["ocr_tier"] = local_models.set_ocr_tier(str(tier))
         elif kind == "mt":
             local["mt_tier"] = local_models.set_mt_tier(str(tier))
+            # 切档位后立刻释放上一档模型:600M 档常驻约 2.4GB,留着会与 1.3B 档叠加
+            try:
+                from app import local_mt
+                freed = local_mt.release(keep=local["mt_tier"])
+                if freed:
+                    self.app.push({"type": "status",
+                                   "text": f"已释放 {freed} 个旧档位模型(内存回收)", "tone": "ok"})
+            except Exception:
+                pass
         elif kind == "source":
             local["source"] = local_models.set_source(str(tier))
         cfgmod.save_config(cfg)

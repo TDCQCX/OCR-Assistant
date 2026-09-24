@@ -380,6 +380,18 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 /* 拖拽光标 */
 .drag-handle { cursor: move; }
 
+/* 新手教程气泡 */
+.guide-pop { animation: guidein .16s ease-out; }
+@keyframes guidein {
+  from { opacity: 0; transform: translateY(4px) scale(.985); }
+  to { opacity: 1; transform: none; }
+}
+.guide-dot {
+  @apply inline-flex items-center justify-center rounded-full shrink-0;
+  width: 16px; height: 16px; font-size: 11px; font-weight: 600;
+  border: 1px solid var(--c-accent); color: var(--c-accent);
+}
+
 /* ============================ 档位卡片 ============================ */
 .tier-card {
   @apply rounded-ctl border border-line px-3 py-2.5;

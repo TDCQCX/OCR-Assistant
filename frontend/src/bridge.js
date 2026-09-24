@@ -14,6 +14,18 @@ window.addEventListener('pywebviewready', () => {
   flush()
 })
 
+/**
+ * 后端事件总入口。必须在这里注册:框选页(selector.html)是独立入口,
+ * 不会走 main.jsx 的 <App>,否则收不到 status / result / guideStart 等推送。
+ */
+if (typeof window !== 'undefined' && !window.__ocrEvent) {
+  window.__ocrEvent = (ev) => {
+    if (!ev) return
+    window.dispatchEvent(new CustomEvent('ocr-event', { detail: ev }))
+    if (typeof window.__ocrStateHandler === 'function') window.__ocrStateHandler(ev)
+  }
+}
+
 export function ready(cb) {
   if (api) return cb(api)
   pending.push(cb)

@@ -28,6 +28,7 @@ Align the capture area over anything on screen (questions, documents, web pages,
 
 ## Features
 
+- **Built-in onboarding guide (speech bubble + arrow)**: a step-by-step walkthrough for each of the five modes, started automatically the first time you enter a mode. The target control is outlined while the rest is dimmed, the bubble explains the step and an arrow points at it; Previous / Next / Skip are supported. Click-through of the hole is paused during the guide and restored afterwards. Settings → Guide lets you replay any mode or reset all guides
 - **Transparent-hole overlay**: only the hole is see-through, the rest is an opaque panel; drag to reposition, adjust hole width/height, window size is remembered
 - **Click-through OCR region**: clicks inside the hole reach the content behind it, while the hole border stays visible
 - **Dual OCR modes**: **Cloud** (recognized by the selected LLM, higher accuracy) or **Local** (built-in RapidOCR, offline & free, ~50 MB, CPU 100–300 ms), switchable from the main UI

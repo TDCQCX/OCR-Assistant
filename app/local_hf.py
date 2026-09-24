@@ -96,6 +96,37 @@ def _load(tier: str):
     return _cache[tier]
 
 
+def release(keep: str = "") -> int:
+    """释放已加载的模型(切档位/关闭端侧翻译时调用),返回释放的档位数量。
+
+    NLLB-600M 加载后常驻约 2.4GB;切到 1.3B 档若两个都留在内存里会叠加,
+    因此切档时必须把上一档丢掉。keep 指定要保留的档位(通常是即将使用的档)。
+    """
+    freed = 0
+    with _lock:
+        for tier in [t for t in list(_cache) if t != keep]:
+            tok, model, _torch = _cache.pop(tier)
+            try:
+                model.to("cpu")
+            except Exception:
+                pass
+            del tok, model
+            freed += 1
+        if freed:
+            try:
+                import gc
+                gc.collect()
+            except Exception:
+                pass
+    return freed
+
+
+def loaded_tiers() -> list:
+    """当前已加载(常驻内存)的档位列表,供设置页展示与验证。"""
+    with _lock:
+        return sorted(_cache)
+
+
 def _lang_id(tokenizer, code: str):
     """NLLB 语言标记 -> id(优先 lang_code_to_id,回退 convert_tokens_to_ids)。"""
     mapping = getattr(tokenizer, "lang_code_to_id", None)

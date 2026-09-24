@@ -90,6 +90,40 @@ def _load() -> tuple:
     return translator, sp, meta
 
 
+def release(keep: str = "") -> int:
+    """释放 CTranslate2 侧已加载的档位(切档位时调用),并同时释放官方 HF 侧缓存。"""
+    freed = 0
+    with _lock:
+        for tier in [t for t in list(_translator) if t != keep]:
+            _translator.pop(tier, None)
+            _sp.pop(tier, None)
+            _meta.pop(tier, None)
+            freed += 1
+        if freed:
+            try:
+                import gc
+                gc.collect()
+            except Exception:
+                pass
+    try:
+        from app import local_hf
+        freed += local_hf.release(keep=keep)
+    except Exception:
+        pass
+    return freed
+
+
+def loaded_tiers() -> list:
+    """当前常驻内存的档位(含官方 HF 档),供设置页展示。"""
+    tiers = set(_translator)
+    try:
+        from app import local_hf
+        tiers |= set(local_hf.loaded_tiers())
+    except Exception:
+        pass
+    return sorted(tiers)
+
+
 def _clean(text: str) -> str:
     text = (text or "").replace("▁", " ").strip()
     while "  " in text:

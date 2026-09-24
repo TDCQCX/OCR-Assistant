@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
+import Guide, { useGuide } from './Guide'
 import {
   Btn, Collapse, EngineSwitch, Icon, IconBtn, IconSeg, Pill, QBox, ResizeHandles, Tip,
   useDownloader, useSmallWindow, useToast, useWindowDrag,
@@ -26,6 +27,7 @@ export default function Overlay() {
   const [size, setSize] = useState({ w: cfg.window?.width || 640, h: cfg.window?.height || 680 })
   const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)
   const small = useSmallWindow()
+  const guide = useGuide('overlay')
 
   useEffect(() => {
     call('last_result').then((r) => { if (r && (r.answer || r.ocr_text)) app.setResult(r) })
@@ -184,17 +186,22 @@ export default function Overlay() {
       {/* ================= 顶部:图标工具栏(可拖动) ================= */}
       <header className="panel shrink-0 h-10 px-2 flex items-center gap-2 drag-handle" {...dragHeader}>
         <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag">O</span>
-        <IconSeg size="sm" value="overlay" options={MODES} onChange={(m) => app.setMode(m)} />
+        <span data-guide="mode" className="no-drag flex items-center">
+          <IconSeg size="sm" value="overlay" options={MODES} onChange={(m) => app.setMode(m)} />
+        </span>
         <span className="flex-1" />
-        <EngineSwitch cloud={(cfg.ocr?.mode || 'cloud') === 'cloud'} onChange={toggleOcr}
-                      tips={['云端', '本地']} />
+        <span data-guide="engine" className="flex items-center no-drag">
+          <EngineSwitch cloud={(cfg.ocr?.mode || 'cloud') === 'cloud'} onChange={toggleOcr}
+                        tips={['云端', '本地']} />
+        </span>
         {/* 只显示当前模型与状态,点击进入设置切换 */}
         <Tip text="点击打开设置,切换模型/平台">
-          <button type="button" className="model-chip no-drag" onClick={() => call('open_settings')}>
+          <button type="button" className="model-chip no-drag" data-guide="model" onClick={() => call('open_settings')}>
             <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: modelReady ? 'var(--c-ok)' : 'var(--c-warn)' }} />
             <span className="truncate">{modelName}</span>
           </button>
         </Tip>
+        <IconBtn icon="info" tip="新手教程" onClick={() => call('guide_start', 'overlay')} />
         <IconBtn icon="pin" tip={topmost ? '取消置顶' : '窗口置顶'} active={topmost} onClick={toggleTop} />
         <IconBtn icon="settings" tip="设置" onClick={() => call('open_settings')} />
         <IconBtn icon="power" tip="退出(Ctrl+Q)" danger onClick={() => app.quit()} />
@@ -204,6 +211,7 @@ export default function Overlay() {
       <div className="flex-1 min-h-0">
         <div
           ref={holeRef}
+          data-guide="hole"
           className="w-full h-full"
           style={{
             border: borderHidden ? 'none' : `2px ${cfg.ui?.holeStyle || 'dashed'} ${cfg.ui?.holeColor || '#ff5252'}`,
@@ -215,11 +223,15 @@ export default function Overlay() {
       {/* ================= 底部:操作 + 结果 ================= */}
       <footer className={`panel shrink-0 border-t px-2.5 space-y-2 ${small ? 'py-1.5' : 'py-2'}`}>
         <div className="flex items-start gap-2">
-          <QBox value={question} onChange={setQuestion} rows={small ? 1 : 2} className="flex-1 no-drag"
-                presets={cfg.behavior?.question_presets} history={cfg.behavior?.question_history}
-                placeholder={`提问/指令(留空则默认:${defaultQuestion})`} />
+          <span data-guide="qbox" className="flex-1 min-w-0">
+            <QBox value={question} onChange={setQuestion} rows={small ? 1 : 2} className="no-drag"
+                  presets={cfg.behavior?.question_presets} history={cfg.behavior?.question_history}
+                  placeholder={`提问/指令(留空则默认:${defaultQuestion})`} />
+          </span>
           <div className="flex flex-col gap-1.5">
-            <Btn primary icon="scan" disabled={busy} onClick={run}>{busy ? '处理中' : '识别'}</Btn>
+            <span data-guide="run">
+              <Btn primary icon="scan" disabled={busy} onClick={run}>{busy ? '处理中' : '识别'}</Btn>
+            </span>
             {!small && (
               <Tip text="翻译模式(无洞口,结果区更大)">
                 <Btn icon="translate" onClick={() => app.setMode('translate')}>翻译</Btn>
@@ -259,7 +271,7 @@ export default function Overlay() {
         </div>
 
         {!small && (
-          <div className="grid grid-cols-2 gap-2.5 max-h-[28vh] overflow-auto">
+          <div data-guide="result" className="grid grid-cols-2 gap-2.5 max-h-[28vh] overflow-auto">
             <Collapse title="识别结果" badge={<span className="hint">{(result?.ocr_text || '').length} 字</span>}>
               <pre className="whitespace-pre-wrap text-[12px] leading-relaxed inset p-2 max-h-36 overflow-auto">
                 {result?.ocr_text || '—'}
@@ -280,6 +292,7 @@ export default function Overlay() {
           </div>
         )}
       </footer>
+      <Guide mode="overlay" open={guide.open} onClose={guide.stop} />
     </div>
   )
 }

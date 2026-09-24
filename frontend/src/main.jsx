@@ -13,6 +13,7 @@ export const AppCtx = createContext(null)
 export const useApp = () => useContext(AppCtx)
 
 /* ------------------- 应用根 ------------------- */
+// 事件总入口已在 bridge.js 中注册(框选页等独立入口也会加载它)
 function App() {
   const view = new URLSearchParams(location.search).get('view') || 'overlay'
   const [cfg, setCfg] = useState(null)
@@ -23,7 +24,7 @@ function App() {
   const [question, setQuestionRaw] = useState('')
   const [version, setVersion] = useState('')
 
-  // 初始化:拉取状态 + 注册后端事件
+  // 初始化:拉取状态 + 注册窗口级状态处理
   useEffect(() => {
     call('get_state').then((s) => {
       setCfg(s.config)
@@ -32,10 +33,7 @@ function App() {
       if (s.config?.behavior?.current_question) setQuestionRaw(s.config.behavior.current_question)
       setStatus({ text: s.key_ready ? '就绪 · Key 已配置' : '就绪 · Key 未配置', tone: s.key_ready ? 'idle' : 'warn' })
     })
-    window.__ocrEvent = (ev) => {
-      if (!ev) return
-      // 同时派发自定义事件,便于各视图监听(如隐藏洞口边框、快捷键触发)
-      window.dispatchEvent(new CustomEvent('ocr-event', { detail: ev }))
+    window.__ocrStateHandler = (ev) => {
       if (ev.type === 'status') setStatus({ text: ev.text, tone: ev.tone || 'working' })
       if (ev.type === 'result') { setResult(ev.data); setBusy(false) }
       if (ev.type === 'error') { setBusy(false); setStatus({ text: '失败', tone: 'danger' }); setResult({ error: ev.text }) }
@@ -43,7 +41,7 @@ function App() {
       if (ev.type === 'history') setHistory(ev.data)
       if (ev.type === 'busy') setBusy(!!ev.value)
     }
-    return () => { delete window.__ocrEvent }
+    return () => { delete window.__ocrStateHandler }
   }, [])
 
   // 跨窗口同步:任一模式改了提问内容,通过 config 广播让其它模式(独立网页上下文)同步

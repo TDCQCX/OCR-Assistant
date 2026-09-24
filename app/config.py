@@ -147,6 +147,7 @@ DEFAULT_CONFIG = {
         "fontSize": 13,                # 全局字号
         "panelOpacity": 96,            # 面板不透明度(%)
         "holeColor": "#FF5252",        # 洞口边框颜色
+        "guideDone": {},               # 新手教程:各模式是否已完成引导(overlay/mini/translate/settings/snip)
         "holeStyle": "dashed",         # solid / dashed / dotted
         "holeRadius": 4,               # 洞口边框圆角
     },

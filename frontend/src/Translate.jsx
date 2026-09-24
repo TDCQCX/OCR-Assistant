@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
+import Guide, { useGuide } from './Guide'
 import {
   Btn, EngineSwitch, Icon, IconBtn, IconSeg, LangPair, Pill, QBox, ResizeHandles, Segmented,
   Tip, useDownloader, useToast, useWindowDrag,
@@ -30,6 +31,7 @@ export default function Translate() {
   const { question, setQuestion } = app  // 全局共享:与悬浮窗/迷你条同步
   const [display, setDisplay] = useState(tr.display || 'bilingual')
   const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)
+  const guide = useGuide('translate')
 
   useEffect(() => {
     call('languages').then((r) => setLangs(r.list || []))
@@ -95,8 +97,11 @@ export default function Translate() {
         <IconSeg size="sm" value="translate" options={MODES} onChange={(m) => app.setMode(m)} />
         <span className="flex-1" />
         <EngineSwitch cloud={ocrCloud} onChange={setOcr} label="识别" tips={['云端', '本地']} />
-        <EngineSwitch cloud={cloud} onChange={toggleTranslateEngine}
-                      label="翻译" tips={['云端', '本地']} />
+        <span data-guide="tr-engine" className="flex items-center">
+          <EngineSwitch cloud={cloud} onChange={toggleTranslateEngine}
+                        label="翻译" tips={['云端', '本地']} />
+        </span>
+        <IconBtn icon="info" tip="新手教程" onClick={() => call('guide_start', 'translate')} />
         <IconBtn icon="pin" tip={topmost ? '取消置顶' : '窗口置顶'} active={topmost}
                  onClick={async () => { const n = !topmost; setTopmost(n); await call('set_topmost', n) }} />
         <IconBtn icon="settings" tip="设置" onClick={() => call('open_settings')} />
@@ -105,16 +110,24 @@ export default function Translate() {
 
       {/* 操作行:语言方向 + 显示方式 + 捕获 */}
       <div className="shrink-0 px-2.5 py-2 flex items-center gap-2 flex-wrap border-b" style={{ borderColor: 'var(--c-line)' }}>
-        <LangPair languages={langs} source={tr.source_lang || '自动检测'} target={tr.target_lang || '中文'}
-                  onChange={(s, t) => setTr({ source_lang: s, target_lang: t })} />
-        <Segmented size="sm" value={display} options={DISPLAYS} onChange={(v) => setTr({ display: v })} />
+        <span data-guide="tr-lang" className="flex items-center">
+          <LangPair languages={langs} source={tr.source_lang || '自动检测'} target={tr.target_lang || '中文'}
+                    onChange={(s, t) => setTr({ source_lang: s, target_lang: t })} />
+        </span>
+        <span data-guide="tr-display" className="flex items-center">
+          <Segmented size="sm" value={display} options={DISPLAYS} onChange={(v) => setTr({ display: v })} />
+        </span>
         <span className="flex-1" />
         <IconBtn icon="refresh" tip="自动刷新(定时重新捕获并翻译)" active={!!tr.auto_refresh}
                  onClick={async () => { await call('set_auto_refresh', !tr.auto_refresh); app.reload() }} />
-        <Btn primary icon="snip" disabled={busy} onClick={() => call('snip_translate')}>
-          {busy ? '处理中' : '框选并翻译'}
-        </Btn>
-        <IconBtn icon="refresh" tip="复用上次框选区域重新翻译" onClick={() => call('run_translate', question)} />
+        <span data-guide="tr-snip">
+          <Btn primary icon="snip" disabled={busy} onClick={() => call('snip_translate')}>
+            {busy ? '处理中' : '框选并翻译'}
+          </Btn>
+        </span>
+        <span data-guide="tr-reuse">
+          <IconBtn icon="refresh" tip="复用上次框选区域重新翻译" onClick={() => call('run_translate', question)} />
+        </span>
         <IconBtn icon="copy" tip="复制译文" onClick={async () => {
           const text = pairs.map((p) => p.dst).filter(Boolean).join('\n')
           const ok = await call('copy_text', text)
@@ -124,7 +137,7 @@ export default function Translate() {
       </div>
 
       {/* 附加要求 */}
-      <div className="shrink-0 px-2.5 pt-2">
+      <div className="shrink-0 px-2.5 pt-2" data-guide="tr-qbox">
         <QBox value={question} onChange={setQuestion} rows={2} className="no-drag"
               presets={cfg.behavior?.question_presets} history={cfg.behavior?.question_history}
               placeholder="附加要求(可选):例如「保持专业术语」「译文更口语化」「只翻译正文」…" />
@@ -189,6 +202,7 @@ export default function Translate() {
           <span className="hint">端侧引擎:{tr.engine === 'auto' ? '自动' : tr.engine}</span>
         </Tip>
       </footer>
+      <Guide mode="translate" open={guide.open} onClose={guide.stop} />
     </div>
   )
 }

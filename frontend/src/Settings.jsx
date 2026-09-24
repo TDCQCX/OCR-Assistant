@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
+import Guide, { useGuide } from './Guide'
 import { applyTheme, resolveTheme, PRESETS, COLOR_FIELDS } from './theme'
 import { Btn, Card, ColorInput, Field, Icon, IconBtn, ModelTiers, Segmented, Switch, useToast } from './ui'
 
@@ -10,16 +11,18 @@ const NAV = [
   { key: 'translate', label: '翻译设置', icon: 'translate' },
   { key: 'appearance', label: '外观主题', icon: 'palette' },
   { key: 'history', label: '识别历史', icon: 'history' },
+  { key: 'guide', label: '新手教程', icon: 'wand' },
   { key: 'about', label: '关于应用', icon: 'info' },
 ]
 
 export default function Settings() {
   const app = useApp()
   const [page, setPage] = useState('model')
+  const guide = useGuide('settings')
   return (
     <div className="h-full flex gap-3 p-3" style={{ background: 'var(--c-bg)' }}>
       {/* 左侧导航 */}
-      <aside className="w-[168px] shrink-0 flex flex-col gap-1.5">
+      <aside className="w-[168px] shrink-0 flex flex-col gap-1.5" data-guide="set-nav">
         <div className="flex items-center gap-2 px-1.5 pb-2">
           <span className="logo-o w-[26px] h-[26px] text-[12px]">O</span>
           <div className="min-w-0">
@@ -41,7 +44,9 @@ export default function Settings() {
           )
         })}
         <span className="flex-1" />
-        <Btn primary icon="check" onClick={() => call('close_settings')}>关闭并保存</Btn>
+        <span data-guide="set-save" className="block">
+          <Btn primary icon="check" className="w-full" onClick={() => call('close_settings')}>关闭并保存</Btn>
+        </span>
       </aside>
 
       {/* 右侧内容 */}
@@ -52,7 +57,9 @@ export default function Settings() {
         {page === 'appearance' && <AppearancePage />}
         {page === 'history' && <HistoryPage />}
         {page === 'about' && <AboutPage />}
+        {page === 'guide' && <GuidePage onGoPage={setPage} />}
       </main>
+      <Guide mode="settings" open={guide.open} onClose={guide.stop} />
     </div>
   )
 }
@@ -688,6 +695,82 @@ function HistoryPage() {
               <div className="text-[13px] mt-1 whitespace-pre-wrap">{h.answer}</div>
             </div>
           ))}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+/* ======================= 新手教程 ======================= */
+const GUIDE_MODES = [
+  { key: 'overlay', label: '悬浮窗', desc: '洞口对准内容 → 填要求 → 识别;四种形态的切换与结果区说明' },
+  { key: 'mini', label: '迷你条', desc: '贴边小条:拖动、输入要求、一键框选识别、切回悬浮窗' },
+  { key: 'translate', label: '翻译模式', desc: '语言方向、框选并翻译、复用上次区域、双语/仅译文' },
+  { key: 'snip', label: '自由框选', desc: '全屏拖拽框选,以及松开后能做的三件事' },
+  { key: 'settings', label: '设置窗口', desc: '分类导航、保存方式与本教程入口' },
+]
+
+function GuidePage({ onGoPage }) {
+  const app = useApp()
+  const toast = useToast()
+  const done = app.cfg?.ui?.guideDone || {}
+  const play = async (mode) => {
+    await call('guide_start', mode)
+    if (mode === 'settings') return                      // 设置页教程就地播放
+    toast(`已切到「${GUIDE_MODES.find((m) => m.key === mode)?.label}」并开始引导`)
+    if (mode === 'snip' || mode === 'overlay' || mode === 'mini' || mode === 'translate') {
+      call('close_settings')
+    }
+  }
+  return (
+    <div className="space-y-3" data-guide="set-guide">
+      <Card title="新手教程" icon="wand"
+            desc="用气泡与箭头一步步介绍各个模式的界面与操作;教程期间悬浮窗会自动暂停洞口穿透,结束后恢复">
+        <div className="space-y-2">
+          {GUIDE_MODES.map((m) => (
+            <div key={m.key} className="inset px-3 py-2 flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{m.label}</span>
+                  {done[m.key]
+                    ? <span className="chip">已看过</span>
+                    : <span className="chip">未看过</span>}
+                </div>
+                <div className="hint mt-0.5">{m.desc}</div>
+              </div>
+              <Btn icon="wand" onClick={() => play(m.key)}>重新观看</Btn>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 pt-1">
+            <Btn onClick={async () => { await call('guide_reset'); toast('已重置:下次进入各模式会重新引导'); app.reload() }}>
+              重置全部教程
+            </Btn>
+            <span className="hint">重置后,首次进入每个模式都会自动弹出引导</span>
+          </div>
+        </div>
+      </Card>
+      <Card title="快捷键" icon="sliders">
+        <div className="space-y-1.5">
+          {[
+            ['Ctrl+F1', '在悬浮窗模式识别洞口内容'],
+            ['Ctrl+Shift+A', '进入自由框选(全屏遮罩)'],
+            ['Ctrl+1 / 2 / 3', '切换 悬浮窗 / 迷你条 / 框选'],
+            ['Enter / Esc', '框选后确认识别 / 取消框选'],
+            ['Ctrl+Q', '退出程序'],
+          ].map(([k, v]) => (
+            <div key={k} className="flex items-center gap-3">
+              <span className="chip font-mono">{k}</span>
+              <span className="hint">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="hint mt-2">快捷键可在「常规设置」中修改。</div>
+      </Card>
+      <Card title="三步上手" icon="check">
+        <div className="space-y-1.5 text-[12.5px] leading-relaxed">
+          <div>1. 在「模型设置」里选平台并填写 API Key 与模型 ID(设置 → 模型设置)。</div>
+          <div>2. 回到悬浮窗,把洞口对准要识别的内容,填一句提问后点「识别」。</div>
+          <div>3. 想离线用:把「云端/本地」开关切到本地,按提示下载端侧模型即可。</div>
         </div>
       </Card>
     </div>
