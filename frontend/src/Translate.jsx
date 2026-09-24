@@ -27,7 +27,7 @@ export default function Translate() {
   const drag = useWindowDrag('translate')
   const tr = cfg.translate || {}
   const [langs, setLangs] = useState([])
-  const [question, setQuestion] = useState('')
+  const { question, setQuestion } = app  // 全局共享:与悬浮窗/迷你条同步
   const [display, setDisplay] = useState(tr.display || 'bilingual')
   const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)
 

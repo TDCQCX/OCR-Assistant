@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
 import { EngineSwitch, Icon, IconBtn, IconSeg, QBox, ResizeHandles, Tip, useWindowDrag } from './ui'
@@ -15,7 +15,7 @@ export default function MiniBar() {
   const app = useApp()
   const { cfg, status, result, busy } = app
   const drag = useWindowDrag('mini')
-  const [question, setQuestion] = useState('')
+  const { question, setQuestion } = app  // 全局共享:与悬浮窗/翻译模式同步
   const tone = { idle: 'var(--c-ok)', working: 'var(--c-warn)', ok: 'var(--c-ok)', danger: 'var(--c-danger)' }[status.tone] || 'var(--c-muted)'
   const preview = result?.error ? `失败:${result.error}` : result?.answer || status.text
 
@@ -30,7 +30,8 @@ export default function MiniBar() {
       style={{ background: 'var(--c-panel)', boxShadow: 'var(--c-shadow)' }}
     >
       {/* 拖动左右边缘可加宽:超过阈值自动切回悬浮窗模式 */}
-      <ResizeHandles which="mini" />
+      {/* 迷你条高度固定:只允许左右拉伸(超过阈值会自动切回悬浮窗) */}
+      <ResizeHandles which="mini" edges={['w', 'e']} />
       {/* 第一行:图标工具栏 */}
       <div className="flex items-center gap-2 px-2 h-[38px] drag-handle" {...drag}>
         <span className="logo-o w-[22px] h-[22px] text-[11px] no-drag" title="OCR 助手">O</span>

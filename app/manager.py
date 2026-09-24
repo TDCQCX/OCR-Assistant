@@ -60,7 +60,7 @@ class App:
         self._create_windows()
         self._register_hotkeys()
         # Qt(WebEngine)后端:透明/无边框/置顶/拖拽均支持
-        webview.start(self._bootstrap, gui="qt", debug=False)
+        webview.start(self._bootstrap, gui="qt", debug=False, private_mode=False)
 
     def _bootstrap(self):
         """启动后校正窗口可见性,并按模式摆好位置。"""
@@ -207,18 +207,21 @@ class App:
                 overlay.hide()
                 translate.hide()
                 mini.show()
+                self._restore_default_size("mini")
                 self._place_mini_default()
             elif mode == "translate":
                 snip.hide()
                 overlay.hide()
                 mini.hide()
                 translate.show()
+                self._restore_default_size("translate")
                 self._place_translate_default()
             else:
                 snip.hide()
                 mini.hide()
                 translate.hide()
                 overlay.show()
+                self._restore_default_size("overlay")
             self.cfg["mode"] = mode
             cfgmod.save_config(self.cfg)
 
@@ -374,11 +377,11 @@ class App:
         dx = float(sx) - d["px"]
         dy = float(sy) - d["py"]
         edge = d["edge"]
-        minw, minh = (360, 260) if which == "overlay" else (420, 340)
+        minw, minh = (360, 260) if which == "overlay" else (360, 78)
         x, y, w, h = d["x"], d["y"], d["w"], d["h"]
         if "e" in edge:
             w = max(minw, w + dx)
-        if "s" in edge:
+        if "s" in edge and which != "mini":   # 迷你条高度固定,不响应上下拉伸
             h = max(minh, h + dy)
         if "w" in edge:
             nw = max(minw, w - dx)
@@ -408,6 +411,11 @@ class App:
             if which == "translate":
                 win_cfg["translate_x"], win_cfg["translate_y"] = pos[0], pos[1]
                 win_cfg["translateWidth"], win_cfg["translateHeight"] = pos[2], pos[3]
+            elif which == "mini":
+                # 注意:迷你条必须写回 mini_* 键,否则会污染悬浮窗尺寸(此前表现为迷你条高度乱变且无法还原)
+                win_cfg["mini_x"], win_cfg["mini_y"] = pos[0], pos[1]
+                win_cfg["miniWidth"] = pos[2]
+                win_cfg["miniHeight"] = int(win_cfg.get("defaultMiniHeight", 78))
             else:
                 win_cfg["x"], win_cfg["y"] = pos[0], pos[1]
                 win_cfg["width"], win_cfg["height"] = pos[2], pos[3]

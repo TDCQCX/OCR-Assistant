@@ -21,7 +21,7 @@ export default function Overlay() {
   const holeRef = useRef(null)
   const dragHeader = useWindowDrag('overlay')
   const dragFooter = useWindowDrag('overlay')
-  const [question, setQuestion] = useState('')  // 仅作为输入;默认提问以灰色占位提示展示
+  const { question, setQuestion } = app  // 全局共享:各模式输入框内容保持同步
   const [borderHidden, setBorderHidden] = useState(false)
   const [size, setSize] = useState({ w: cfg.window?.width || 640, h: cfg.window?.height || 680 })
   const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)

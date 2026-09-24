@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import { call } from './bridge'
@@ -20,6 +20,7 @@ function App() {
   const [result, setResult] = useState(null)
   const [history, setHistory] = useState([])
   const [busy, setBusy] = useState(false)
+  const [question, setQuestionRaw] = useState('')
   const [version, setVersion] = useState('')
 
   // 初始化:拉取状态 + 注册后端事件
@@ -28,6 +29,7 @@ function App() {
       setCfg(s.config)
       setVersion(s.version || '')
       if (s.history) setHistory(s.history)
+      if (s.config?.behavior?.current_question) setQuestionRaw(s.config.behavior.current_question)
       setStatus({ text: s.key_ready ? '就绪 · Key 已配置' : '就绪 · Key 未配置', tone: s.key_ready ? 'idle' : 'warn' })
     })
     window.__ocrEvent = (ev) => {
@@ -47,8 +49,17 @@ function App() {
   // 主题应用(带上 ui.panelOpacity 等附加项)
   useEffect(() => { if (cfg) applyTheme(resolveTheme(cfg.ui), cfg.ui) }, [cfg])
 
+  const persistRef = useRef(0)
+  const setQuestion = (v) => {
+    setQuestionRaw(v)
+    // 防抖持久化:切换模式/重启后仍保留用户填写的提问
+    clearTimeout(persistRef.current)
+    persistRef.current = setTimeout(() => call('set_config_value', 'behavior.current_question', v), 700)
+  }
+
   const api = useMemo(() => ({
     cfg, setCfg, status, setStatus, result, setResult, history, setHistory, busy, setBusy, version, view,
+    question, setQuestion,
     /** 保存一条 ui 配置并广播到所有窗口 */
     async setUi(patch) {
       const next = { ...cfg, ui: { ...cfg.ui, ...patch } }
@@ -71,7 +82,7 @@ function App() {
     dragBegin(w, x, y) { call('drag_begin', w, x, y) },
     dragMove(w, x, y) { call('drag_move', w, x, y) },
     dragEnd(w) { call('drag_end', w) },
-  }), [cfg, status, result, history, busy, version, view])
+  }), [cfg, status, result, history, busy, version, view, question])
 
   if (!cfg) return <div className="h-full grid place-items-center text-muted">正在连接后端…</div>
 

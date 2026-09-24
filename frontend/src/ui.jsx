@@ -276,7 +276,7 @@ export function useWindowDrag(which) {
 /* ============================ 窗口边框缩放(无边框窗口) ============================ */
 const EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 
-export function ResizeHandles({ which, onStart }) {
+export function ResizeHandles({ which, onStart, edges }) {
   const st = useRef(null)
   const start = (edge) => (e) => {
     if (e.button !== 0) return
@@ -296,9 +296,10 @@ export function ResizeHandles({ which, onStart }) {
     call('resize_end', which)
   }
   const common = { onPointerMove: move, onPointerUp: end, onPointerCancel: end, onLostPointerCapture: end }
+  const list = edges && edges.length ? edges : EDGES
   return (
     <>
-      {EDGES.map((edge) => (
+      {list.map((edge) => (
         <span key={edge} className={`rs rs-${edge}`} onPointerDown={start(edge)} {...common} />
       ))}
     </>
