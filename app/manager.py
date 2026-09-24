@@ -1026,6 +1026,11 @@ class App:
                 self.push({"type": "error", "text": "未配置 API Key:请在「设置 → 模型设置」填写,"
                                                    "或把 OCR/翻译都切换为端侧"})
                 return
+            if need_key and not (prov.get("model") or "").strip():
+                self.push({"type": "error",
+                           "text": f"平台「{prov.get('name') or ''}」还没填模型 ID:"
+                                   "请在「设置 → 模型设置」补上后再试"})
+                return
             tr_cfg["ollama_url"] = self._local_ollama_url()
             tr_cfg["ollama_model"] = self._local_ollama_model()
             client = AgentClient(

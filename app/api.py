@@ -130,13 +130,15 @@ class Api:
     # ================= 平台管理 =================
     def list_providers(self) -> dict:
         cfg = self.app.cfg
+        active = cfg.get("active_provider")
         items = []
         for i, p in enumerate(cfg.get("providers", [])):
             items.append({"i": i, "id": p.get("id"), "name": p.get("name"),
                           "color": p.get("color", "#8b94a7"),
-                          "ready": bool((p.get("api_key") or "").strip())})
+                          "ready": cfgmod.provider_ready(p),
+                          "has_model": bool((p.get("model") or "").strip()),
+                          "active": p.get("id") == active})
         ids = [p.get("id") for p in cfg.get("providers", [])]
-        active = cfg.get("active_provider")
         return {"list": items, "active": active,
                 "index": ids.index(active) if active in ids else 0}
 
@@ -231,7 +233,16 @@ class Api:
         if field in ("api_key", "model", "base_url", "note", "homepage", "name") and isinstance(value, str):
             value = value.strip()
         provs[int(i)][field] = value
+        # Key 被填上/清空都会影响"选中平台"是否可用:让规则重新收敛一次
+        before = cfg.get("active_provider")
+        cfgmod.ensure_active_provider(cfg)
         cfgmod.save_config(cfg)
+        if cfg.get("active_provider") != before:
+            picked = next((p for p in provs if p.get("id") == cfg.get("active_provider")), {})
+            self.app.push({"type": "status",
+                           "text": f"已自动切换使用平台:{picked.get('name', cfg.get('active_provider'))}",
+                           "tone": "ok"})
+            self.app.push({"type": "config", "config": cfg})
         return True
 
     def provider_add(self) -> int:
@@ -250,21 +261,31 @@ class Api:
         provs = cfg.get("providers", [])
         if not (0 <= int(i) < len(provs)):
             return False
-        removed = provs.pop(int(i))
-        if cfg.get("active_provider") == removed.get("id"):
-            cfg["active_provider"] = provs[0].get("id", "") if provs else ""
+        provs.pop(int(i))
+        # 删掉的正好是选中平台 → 回落到其它已配置的平台(而不是硬取第一个,可能是未配置的)
+        cfgmod.ensure_active_provider(cfg)
         cfgmod.save_config(cfg)
         self.app.push({"type": "config", "config": cfg})
         return True
 
     def set_active_provider(self, pid: str) -> bool:
+        """切换"当前使用的平台"。只允许选中已配置(填了 Key)的平台。"""
         cfg = self.app.cfg
-        if any(p.get("id") == pid for p in cfg.get("providers", [])):
-            cfg["active_provider"] = pid
-            cfgmod.save_config(cfg)
-            self.app.push({"type": "config", "config": cfg})
+        pid = str(pid or "")
+        prov = next((p for p in cfg.get("providers", []) if p.get("id") == pid), None)
+        if prov is None or not cfgmod.provider_ready(prov):
+            return False
+        if cfg.get("active_provider") == pid:
             return True
-        return False
+        cfg["active_provider"] = pid
+        cfgmod.save_config(cfg)
+        missing_model = not (prov.get("model") or "").strip()
+        self.app.push({"type": "status",
+                       "text": f"已切换使用平台:{prov.get('name', pid)}"
+                               + ("(该平台还没填模型 ID)" if missing_model else ""),
+                       "tone": "warn" if missing_model else "ok"})
+        self.app.push({"type": "config", "config": cfg})
+        return True
 
     def provider_preview(self, i: int) -> str:
         """按当前平台字段生成 JSON 请求预览。"""

@@ -76,10 +76,12 @@ function ModelPage() {
   const [showKey, setShowKey] = useState(false)
   const [tplOpen, setTplOpen] = useState(false)
   const [tpl, setTpl] = useState('')
+  const [activeId, setActiveId] = useState('')
 
   const reload = async (keep) => {
     const r = await call('list_providers')
     setList(r.list || [])
+    setActiveId(r.active || '')
     const n = keep ?? r.index ?? 0
     setIdx(n)
     loadForm(n)
@@ -127,14 +129,29 @@ function ModelPage() {
   const ready = (p) => p.ready === true || !!(p.api_key || '').trim()
   const configured = list.filter(ready)
   const unconfigured = list.filter((p) => !ready(p))
+  const activeItem = list.find((p) => p.id === activeId) || null
+
+  /** 切换"当前使用的平台":只有已配置的平台可选(未配置项不显示选中标记) */
+  const pickActive = async (p) => {
+    if (!ready(p) || p.id === activeId) return
+    const ok = await call('set_active_provider', p.id)
+    if (!ok) { toast('该平台尚未配置,请先填写 API Key', 'danger'); return }
+    setActiveId(p.id)
+    setList((ls) => ls.map((x) => ({ ...x, active: x.id === p.id })))
+    await app.reload()
+    if (!(p.has_model)) toast(`已切换到「${p.name}」,但还没填模型 ID`, 'warn')
+    else toast(`已切换到「${p.name}」`)
+  }
 
   const Item = ({ p, i }) => (
     <div
       onClick={() => { setIdx(i); loadForm(i) }}
       className="group flex items-center gap-2 px-2 h-[34px] rounded-ctl border cursor-pointer transition-colors"
+      data-active={p.id === activeId ? '1' : '0'}
       style={{
-        background: idx === i ? 'var(--c-accent-soft)' : 'var(--c-card)',
-        borderColor: idx === i ? 'var(--c-accent)' : 'var(--c-line)',
+        background: p.id === activeId ? 'var(--c-accent-soft)'
+          : (idx === i ? 'var(--c-sub)' : 'var(--c-card)'),
+        borderColor: p.id === activeId ? 'var(--c-accent)' : (idx === i ? 'var(--c-accent)' : 'var(--c-line)'),
         opacity: ready(p) ? 1 : 0.62,
       }}
     >
@@ -143,6 +160,29 @@ function ModelPage() {
         {p.name?.[0]}
       </span>
       <span className="truncate flex-1 text-[12.5px]">{p.name}</span>
+      {ready(p) && !p.has_model && (
+        <span className="hint shrink-0" title="还没填模型 ID" style={{ color: 'var(--c-warn)' }}>缺模型</span>
+      )}
+      {/* 选中标记:仅已配置的平台显示;点击即切换为"当前使用" */}
+      {ready(p) ? (
+        <button
+          type="button"
+          className="shrink-0 grid place-items-center no-drag"
+          title={p.id === activeId ? '当前使用中' : '设为使用'}
+          aria-pressed={p.id === activeId}
+          onClick={(e) => { e.stopPropagation(); pickActive(p) }}
+          style={{
+            width: 18, height: 18, borderRadius: 999,
+            border: `1.5px solid ${p.id === activeId ? 'var(--c-accent)' : 'var(--c-line)'}`,
+            background: p.id === activeId ? 'var(--c-accent)' : 'transparent',
+            color: p.id === activeId ? 'var(--c-accent-fg)' : 'var(--c-muted)',
+          }}
+        >
+          {p.id === activeId && <Icon name="check" size={11} />}
+        </button>
+      ) : (
+        <span className="shrink-0" style={{ width: 18 }} />
+      )}
       <button
         className="opacity-0 group-hover:opacity-100 text-danger p-0.5 rounded hover:bg-danger/10 no-drag"
         title="删除平台"
@@ -165,6 +205,11 @@ function ModelPage() {
         <div className="flex items-center gap-2 px-0.5">
           <Icon name="chip" size={15} className="text-accent" />
           <span className="font-semibold">AI 平台管理</span>
+          <span className="flex-1" />
+        </div>
+        <div className="hint px-1 leading-snug">
+          右侧圆点 = <span style={{ color: 'var(--c-accent)' }}>当前使用</span>的平台;点圆点即可切换。
+          未填 Key 的平台不可选中。
         </div>
         <div className="flex-1 overflow-auto space-y-1.5 pr-1">
           {configured.length > 0 && <div className="hint px-1">已配置({configured.length})</div>}
@@ -172,6 +217,16 @@ function ModelPage() {
           {unconfigured.length > 0 && <div className="hint px-1 pt-1">未配置({unconfigured.length})</div>}
           {unconfigured.map((p) => <Item key={p.id} p={p} i={list.indexOf(p)} />)}
         </div>
+        {configured.length === 0 && (
+          <div className="hint px-1" style={{ color: 'var(--c-warn)' }}>
+            还没有可用的平台:请在右侧填写 API Key,填好后会自动选中。
+          </div>
+        )}
+        {activeItem && !activeItem.has_model && (
+          <div className="hint px-1" style={{ color: 'var(--c-warn)' }}>
+            当前平台「{activeItem.name}」还没填模型 ID,请求会失败。
+          </div>
+        )}
         <Btn icon="plus" onClick={async () => { await call('provider_add'); reload(list.length) }}>自定义平台</Btn>
       </div>
 

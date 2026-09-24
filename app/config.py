@@ -253,6 +253,27 @@ LANG_CODES = {
 THINKING_PROVIDER_IDS = ("bailian",)
 
 
+def provider_ready(p: dict) -> bool:
+    """该平台是否已配置(填了 API Key)。"""
+    return bool((p.get("api_key") or "").strip())
+
+
+def ensure_active_provider(cfg: dict) -> str:
+    """保证 active_provider 指向一个"可用"的平台,返回最终选中的 id(没有可用平台时为空)。
+
+    规则:已填 Key 的平台里,当前选中的保持不变;当前选中的不可用(未配置/被删)时
+    自动切到已配置的平台(多个时取列表里的第一个),避免出现"配好了却用不上"。
+    """
+    provs = cfg.get("providers") or []
+    usable = [p for p in provs if provider_ready(p)]
+    active = cfg.get("active_provider") or ""
+    if any(p.get("id") == active for p in usable):
+        return active
+    picked = usable[0].get("id", "") if usable else ""
+    cfg["active_provider"] = picked
+    return picked
+
+
 def active_provider(cfg: dict) -> dict:
     """返回当前激活的服务商配置。"""
     active = cfg.get("active_provider", "")
@@ -294,7 +315,13 @@ def load_config() -> dict:
             pass  # 配置损坏时使用默认值
     try:
         cfg.setdefault("app", {})["version"] = APP_VERSION
-        if _migrate_prompts(cfg):
+        changed = _migrate_prompts(cfg)
+        # 保证选中平台可用:只配了一个就自动选中;选中的被清空/删除则回落到已配置的平台
+        before = cfg.get("active_provider")
+        ensure_active_provider(cfg)
+        if cfg.get("active_provider") != before:
+            changed = True
+        if changed:
             save_config(cfg)
     except Exception:
         pass
