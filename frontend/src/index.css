@@ -386,6 +386,19 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   from { opacity: 0; transform: translateY(4px) scale(.985); }
   to { opacity: 1; transform: none; }
 }
+/* 目标描边脉动,强调"看这里" */
+.guide-ring { animation: ringpulse 1.6s ease-in-out infinite; }
+@keyframes ringpulse {
+  0%, 100% { box-shadow: 0 0 0 9999px rgba(8, 12, 18, .55), 0 0 0 0 var(--c-accent-soft); }
+  50% { box-shadow: 0 0 0 9999px rgba(8, 12, 18, .55), 0 0 0 6px var(--c-accent-soft); }
+}
+/* 箭头落点的脉动圆环 */
+.guide-dot-pulse { animation: dotpulse 1.4s ease-out infinite; transform-origin: center; }
+@keyframes dotpulse {
+  0% { opacity: .95; r: 4; }
+  70% { opacity: 0; r: 13; }
+  100% { opacity: 0; r: 13; }
+}
 .guide-dot {
   @apply inline-flex items-center justify-center rounded-full shrink-0;
   width: 16px; height: 16px; font-size: 11px; font-weight: 600;

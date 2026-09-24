@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { call } from './bridge'
 import { Icon } from './ui'
 
@@ -106,6 +106,23 @@ export default function Guide({ mode, open, onClose }) {
   const [idx, setIdx] = useState(0)
   const [box, setBox] = useState(null)
   const [tick, setTick] = useState(0)
+  const bubbleRef = useRef(null)
+  const [bubble, setBubble] = useState({ w: 0, h: 0 })   // 气泡实测尺寸(箭头要贴着它的外框画)
+
+  // 气泡高度随文案变化,渲染后量一次,箭头起点才准
+  useEffect(() => {
+    if (!open) return undefined
+    const el = bubbleRef.current
+    if (!el) return undefined
+    const measure = () => {
+      const r = el.getBoundingClientRect()
+      setBubble((b) => (Math.abs(b.w - r.width) > 1 || Math.abs(b.h - r.height) > 1
+        ? { w: r.width, h: r.height } : b))
+    }
+    measure()
+    const t = setTimeout(measure, 120)
+    return () => clearTimeout(t)
+  }, [open, idx, mode])
 
   // 只保留目标真实存在的步骤(窗口过小时某些元素会被隐藏)
   const valid = useMemo(() => steps.filter((s) => !!document.querySelector(`[data-guide="${s.target}"]`)),
@@ -134,44 +151,68 @@ export default function Guide({ mode, open, onClose }) {
   const W = window.innerWidth
   const H = window.innerHeight
   const BW = Math.min(300, Math.max(200, W - 24))       // 气泡宽度
-  const GAP = 46                                        // 气泡与目标之间的间距(含箭头长度)
+  const GAP = 58                                        // 气泡与目标之间的间距(留给气泡外的箭头)
+  const BH = bubble.h || 130                            // 气泡实测高度(未测量前用估值)
 
   let place = step.place || 'below'
   let bx = 12
   let by = 12
   if (box) {
     const cx = box.x + box.w / 2
-    // 纵向空间不够时自动换成相反方向
-    if (place === 'below' && box.y + box.h + GAP + 130 > H) place = 'above'
-    if (place === 'above' && box.y - GAP - 130 < 0) place = 'below'
+    // 空间不够时自动换成相反方向
+    if (place === 'below' && box.y + box.h + GAP + BH > H) place = 'above'
+    if (place === 'above' && box.y - GAP - BH < 0) place = 'below'
     if (place === 'right' && box.x + box.w + GAP + BW > W) place = 'left'
     if (place === 'left' && box.x - GAP - BW < 0) place = 'right'
     if (place === 'below') { by = box.y + box.h + GAP; bx = cx - BW / 2 }
-    else if (place === 'above') { by = box.y - GAP - 112; bx = cx - BW / 2 }
-    else if (place === 'right') { bx = box.x + box.w + GAP; by = box.y + box.h / 2 - 50 }
-    else { bx = box.x - GAP - BW; by = box.y + box.h / 2 - 50 }
+    else if (place === 'above') { by = box.y - GAP - BH; bx = cx - BW / 2 }
+    else if (place === 'right') { bx = box.x + box.w + GAP; by = box.y + box.h / 2 - BH / 2 }
+    else { bx = box.x - GAP - BW; by = box.y + box.h / 2 - BH / 2 }
   }
-  bx = Math.max(10, Math.min(bx, W - BW - 10))
-  by = Math.max(10, Math.min(by, H - 128))
+  bx = Math.max(10, Math.min(bx, Math.max(10, W - BW - 10)))
+  by = Math.max(10, Math.min(by, Math.max(10, H - BH - 10)))
 
-  // 箭头指向目标中心
+  /* 指示箭头:完全画在气泡外面 —— 从气泡边缘出发,指向目标正中心,
+     并在目标处画一个脉动圆点,位置再挤也不会指错。 */
   let arrow = null
   if (box) {
-    const cx = box.x + box.w / 2
-    const cy = box.y + box.h / 2
-    const AR = 9
-    if (place === 'below') {
-      arrow = { left: Math.max(14, Math.min(cx - bx - AR, BW - 2 * AR - 14)), top: -AR + 1,
-                border: `${AR}px solid transparent`, borderBottom: `${AR}px solid var(--c-accent)` }
-    } else if (place === 'above') {
-      arrow = { left: Math.max(14, Math.min(cx - bx - AR, BW - 2 * AR - 14)), bottom: -AR + 1,
-                border: `${AR}px solid transparent`, borderTop: `${AR}px solid var(--c-accent)` }
-    } else if (place === 'right') {
-      arrow = { top: Math.max(12, Math.min(cy - by - AR, 76)), left: -AR + 1,
-                border: `${AR}px solid transparent`, borderRight: `${AR}px solid var(--c-accent)` }
+    const tcx = box.x + box.w / 2
+    const tcy = box.y + box.h / 2
+    const bcx = bx + BW / 2
+    const bcy = by + BH / 2
+    let dx = tcx - bcx
+    let dy = tcy - bcy
+    const len = Math.hypot(dx, dy) || 1
+    const ux = dx / len
+    const uy = dy / len
+    // 起点:气泡外框(留 2px 缝)上,沿目标方向的交点
+    const halfW = BW / 2 + 2
+    const halfH = BH / 2 + 2
+    const kx = Math.abs(ux) > 1e-6 ? halfW / Math.abs(ux) : Infinity
+    const ky = Math.abs(uy) > 1e-6 ? halfH / Math.abs(uy) : Infinity
+    const k = Math.min(kx, ky)
+    const sx = bcx + ux * k
+    const sy = bcy + uy * k
+    // 终点:目标外缘外 10px(不再压住控件)
+    const ex = tcx - ux * 10
+    const ey = tcy - uy * 10
+    const dist = Math.hypot(ex - sx, ey - sy)
+    if (dist > 6) {
+      const head = 7
+      const px = -uy
+      const py = ux
+      const tipBack = 11
+      const wing = 7
+      arrow = {
+        line: { x1: sx, y1: sy, x2: ex - ux * (tipBack - 3), y2: ey - uy * (tipBack - 3) },
+        // 箭头三角:尖端指向目标
+        tri: `${ex},${ey} ${ex - ux * tipBack + px * wing},${ey - uy * tipBack + py * wing} `
+             + `${ex - ux * tipBack - px * wing},${ey - uy * tipBack - py * wing}`,
+        dot: { x: tcx, y: tcy },
+        head,
+      }
     } else {
-      arrow = { top: Math.max(12, Math.min(cy - by - AR, 76)), right: -AR + 1,
-                border: `${AR}px solid transparent`, borderLeft: `${AR}px solid var(--c-accent)` }
+      arrow = { line: null, tri: null, dot: { x: tcx, y: tcy }, head: 7 }
     }
   }
 
@@ -181,10 +222,10 @@ export default function Guide({ mode, open, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[80] pointer-events-none" data-guide-layer={mode}>
-      {/* 挖空高亮:超大阴影把其余区域压暗(不拦截鼠标) */}
+      {/* 挖空高亮:超大阴影把其余区域压暗(不拦截鼠标);描边做脉动强调 */}
       {box && (
         <div
-          className="absolute transition-all duration-200"
+          className="absolute transition-all duration-200 guide-ring"
           style={{
             left: box.x - 4, top: box.y - 4, width: box.w + 8, height: box.h + 8,
             borderRadius: 8, border: '2px solid var(--c-accent)',
@@ -192,12 +233,27 @@ export default function Guide({ mode, open, onClose }) {
           }}
         />
       )}
+      {/* 指示箭头(SVG,画在气泡之外) */}
+      {arrow && (
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
+          {arrow.line && (
+            <line
+              x1={arrow.line.x1} y1={arrow.line.y1} x2={arrow.line.x2} y2={arrow.line.y2}
+              stroke="var(--c-accent)" strokeWidth="2" strokeLinecap="round"
+            />
+          )}
+          {arrow.tri && <polygon points={arrow.tri} fill="var(--c-accent)" />}
+          <circle cx={arrow.dot.x} cy={arrow.dot.y} r="4" fill="var(--c-accent)" opacity="0.9" />
+          <circle className="guide-dot-pulse" cx={arrow.dot.x} cy={arrow.dot.y} r="4"
+                  fill="none" stroke="var(--c-accent)" strokeWidth="2" />
+        </svg>
+      )}
       {/* 气泡 */}
       <div
+        ref={bubbleRef}
         className="absolute rounded-card border shadow-xl p-2.5 pointer-events-auto guide-pop"
         style={{ left: bx, top: by, width: BW, background: 'var(--c-panel)', borderColor: 'var(--c-accent)' }}
       >
-        {arrow && <span className="absolute w-0 h-0" style={arrow} />}
         <div className="flex items-center gap-2">
           <Icon name="info" size={14} className="text-[color:var(--c-accent)]" />
           <span className="font-semibold text-[13px]">{step.title}</span>

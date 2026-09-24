@@ -122,7 +122,9 @@ function ModelPage() {
   }[test.state]
   const latencyColor = test.ms < 1500 ? 'var(--c-ok)' : test.ms < 3500 ? 'var(--c-warn)' : 'var(--c-danger)'
 
-  const ready = (p) => !!(p.api_key || '').trim()
+  // 平台是否已配置:后端 list_providers 只回传 ready 布尔值(不回传 Key 本身),
+  // 因此这里必须认 p.ready;以前只判断 p.api_key 会导致"填了 Key 仍显示未配置"。
+  const ready = (p) => p.ready === true || !!(p.api_key || '').trim()
   const configured = list.filter(ready)
   const unconfigured = list.filter((p) => !ready(p))
 
