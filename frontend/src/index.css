@@ -222,7 +222,9 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   height: 100%;
   border-radius: 999px;
   background: var(--c-accent);
-  transition: width .25s ease;
+  transform-origin: left center;
+  transition: transform var(--dur-2) var(--ease-out);
+  will-change: transform;
 }
 .model-chip {
   @apply inline-flex items-center gap-1.5 h-7 px-2.5 rounded-ctl border border-line;
@@ -246,7 +248,9 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   padding: 0 7px;
   color: var(--c-muted);
   font-size: 12px;
-  transition: background .18s ease, color .18s ease, padding .22s ease;
+  contain: layout paint;                                  /* 把展开动画的重排限制在自身 */
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out),
+              padding var(--dur-2) var(--ease-out);
 }
 .iconseg-item:hover { background: var(--c-hover); color: var(--c-fg); }
 .iconseg-item[data-active="1"] {
@@ -267,13 +271,13 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 /* ============================ 云端 / 本地 引擎开关 ============================ */
 .engine-switch { @apply inline-flex items-center gap-1.5 shrink-0; }
 .engine-track {
-  @apply relative inline-flex items-center rounded-full border transition-all;
+  @apply relative inline-flex items-center rounded-full border;
   width: 66px;
   height: 21px;
   background: var(--c-sub);
   border-color: var(--c-line);
   padding: 0 4px;
-  transition: background .22s ease, border-color .22s ease;
+  transition: background var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out);
 }
 .engine-track[data-cloud="1"] { background: var(--c-accent-soft); border-color: var(--c-accent); }
 .engine-knob {
@@ -380,24 +384,62 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 /* 拖拽光标 */
 .drag-handle { cursor: move; }
 
-/* 新手教程气泡 */
-.guide-pop { animation: guidein .16s ease-out; }
+/* ============================ 动画与过渡:统一缓动 + 只动合成属性 ============================ */
+:root {
+  --ease-out: cubic-bezier(.22, .61, .36, 1);
+  --ease-in-out: cubic-bezier(.4, 0, .2, 1);
+  --dur-1: 130ms;
+  --dur-2: 220ms;
+}
+
+/* 尊重系统「减少动态效果」 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* 拖拽/缩放期间关闭过渡:窗口本身在动,元素再补间会显得"拖尾" */
+body.dragging *, body.dragging *::before, body.dragging *::after {
+  transition-duration: 0ms !important;
+  animation-duration: 0ms !important;
+}
+
+/* ============================ 新手教程气泡 ============================ */
+.guide-pop {
+  animation: guidein var(--dur-2) var(--ease-out);
+  will-change: transform, opacity;
+}
 @keyframes guidein {
-  from { opacity: 0; transform: translateY(4px) scale(.985); }
+  from { opacity: 0; transform: translateY(6px) scale(.98); }
   to { opacity: 1; transform: none; }
 }
-/* 目标描边脉动,强调"看这里" */
-.guide-ring { animation: ringpulse 1.6s ease-in-out infinite; }
-@keyframes ringpulse {
-  0%, 100% { box-shadow: 0 0 0 9999px rgba(8, 12, 18, .55), 0 0 0 0 var(--c-accent-soft); }
-  50% { box-shadow: 0 0 0 9999px rgba(8, 12, 18, .55), 0 0 0 6px var(--c-accent-soft); }
+/* 目标描边脉动:阴影保持静止,只让一个环做 transform/opacity 动画(不再重绘 9999px 阴影) */
+.guide-spot {
+  box-shadow: 0 0 0 9999px rgba(8, 12, 18, .55);
 }
-/* 箭头落点的脉动圆环 */
-.guide-dot-pulse { animation: dotpulse 1.4s ease-out infinite; transform-origin: center; }
+.guide-ring-pulse {
+  animation: ringpulse 1.6s var(--ease-in-out) infinite;
+  will-change: transform, opacity;
+}
+@keyframes ringpulse {
+  0% { transform: scale(1); opacity: .85; }
+  70% { transform: scale(1.06); opacity: 0; }
+  100% { transform: scale(1.06); opacity: 0; }
+}
+/* 箭头落点脉动:用 transform 缩放(不再改 SVG r,避免每帧重排) */
+.guide-dot-pulse {
+  animation: dotpulse 1.4s var(--ease-out) infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
 @keyframes dotpulse {
-  0% { opacity: .95; r: 4; }
-  70% { opacity: 0; r: 13; }
-  100% { opacity: 0; r: 13; }
+  0% { transform: scale(.8); opacity: .95; }
+  70% { transform: scale(2.6); opacity: 0; }
+  100% { transform: scale(2.6); opacity: 0; }
 }
 .guide-dot {
   @apply inline-flex items-center justify-center rounded-full shrink-0;

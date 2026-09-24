@@ -131,20 +131,35 @@ export default function Guide({ mode, open, onClose }) {
 
   useEffect(() => { if (open) setIdx(0) }, [open, mode])
 
+  // 测量目标位置:步骤变化 / 窗口尺寸变化 / 面板内容变化时各测几次即可。
+  // (以前用 400ms 定时器常驻重测,引导开着就会一直触发 React 重渲染,动画因此发涩)
   useEffect(() => {
     if (!open) return undefined
     const measure = () => {
       const step = valid[idx]
-      const r = step ? rectOf(step.target) : null
-      setBox(r)
-      setTick((n) => n + 1)
+      setBox(step ? rectOf(step.target) : null)
     }
     measure()
+    const timers = [140, 340, 700].map((ms) => setTimeout(measure, ms))
+    let ro = null
+    try {
+      ro = new ResizeObserver(measure)
+      ro.observe(document.body)
+    } catch (e) { /* 忽略 */ }
     window.addEventListener('resize', measure)
-    const t = setInterval(measure, 400)   // 面板高度会随内容变化,定时校正
-    return () => { window.removeEventListener('resize', measure); clearInterval(t) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, idx, valid.length])
+    return () => {
+      timers.forEach(clearTimeout)
+      window.removeEventListener('resize', measure)
+      if (ro) ro.disconnect()
+    }
+  }, [open, idx, valid.length, tick])
+
+  // 首次打开时校验一次"哪些步骤的目标当前可见"(只做一次,避免常驻重渲染)
+  useEffect(() => {
+    if (!open) return undefined
+    const t = setTimeout(() => setTick((n) => n + 1), 260)
+    return () => clearTimeout(t)
+  }, [open, mode])
 
   if (!open || !valid.length) return null
   const step = valid[Math.min(idx, valid.length - 1)]
@@ -222,16 +237,24 @@ export default function Guide({ mode, open, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[80] pointer-events-none" data-guide-layer={mode}>
-      {/* 挖空高亮:超大阴影把其余区域压暗(不拦截鼠标);描边做脉动强调 */}
+      {/* 挖空高亮:静止的超大阴影负责压暗,另有一个只做 transform/opacity 的环做脉动 */}
       {box && (
-        <div
-          className="absolute transition-all duration-200 guide-ring"
-          style={{
-            left: box.x - 4, top: box.y - 4, width: box.w + 8, height: box.h + 8,
-            borderRadius: 8, border: '2px solid var(--c-accent)',
-            boxShadow: '0 0 0 9999px rgba(8, 12, 18, 0.55)',
-          }}
-        />
+        <>
+          <div
+            className="absolute guide-spot"
+            style={{
+              left: box.x - 4, top: box.y - 4, width: box.w + 8, height: box.h + 8,
+              borderRadius: 8, border: '2px solid var(--c-accent)',
+            }}
+          />
+          <div
+            className="absolute guide-ring-pulse"
+            style={{
+              left: box.x - 4, top: box.y - 4, width: box.w + 8, height: box.h + 8,
+              borderRadius: 8, border: '2px solid var(--c-accent)',
+            }}
+          />
+        </>
       )}
       {/* 指示箭头(SVG,画在气泡之外) */}
       {arrow && (
@@ -244,8 +267,8 @@ export default function Guide({ mode, open, onClose }) {
           )}
           {arrow.tri && <polygon points={arrow.tri} fill="var(--c-accent)" />}
           <circle cx={arrow.dot.x} cy={arrow.dot.y} r="4" fill="var(--c-accent)" opacity="0.9" />
-          <circle className="guide-dot-pulse" cx={arrow.dot.x} cy={arrow.dot.y} r="4"
-                  fill="none" stroke="var(--c-accent)" strokeWidth="2" />
+          <circle className="guide-dot-pulse" cx={arrow.dot.x} cy={arrow.dot.y} r="5"
+                  fill="none" stroke="var(--c-accent)" strokeWidth="1.6" />
         </svg>
       )}
       {/* 气泡 */}

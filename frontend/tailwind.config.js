@@ -27,7 +27,11 @@ export default {
         fadein: { '0%': { opacity: 0, transform: 'translateY(4px)' }, '100%': { opacity: 1, transform: 'none' } },
         pop: { '0%': { opacity: 0, transform: 'scale(.96)' }, '100%': { opacity: 1, transform: 'scale(1)' } },
       },
-      animation: { fadein: 'fadein .18s ease-out', pop: 'pop .14s ease-out' },
+      // 统一缓动(与 index.css 的 --ease-out 一致);只动 transform/opacity,尽量留在合成层
+      animation: {
+        fadein: 'fadein .18s cubic-bezier(.22,.61,.36,1)',
+        pop: 'pop .16s cubic-bezier(.22,.61,.36,1)',
+      },
     },
   },
   plugins: [],

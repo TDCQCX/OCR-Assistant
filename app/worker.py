@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """识别流程线程(纯 Python 线程 + 回调):OCR -> 题目解析 -> 本地知识库/模型回答/翻译。"""
+import json
 import threading
 import time
 

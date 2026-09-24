@@ -249,22 +249,65 @@ export function QBox({ value, onChange, presets, history, rows = 2, placeholder,
 }
 
 /* ============================ 拖拽窗口(受控,pointerup 必定结束) ============================ */
+/* ============================ 窗口拖拽(帧同步:每帧最多一次跨进程调用) ============================ */
+/** 把高频 pointermove 合并到 requestAnimationFrame:拖动/缩放更顺滑,也不会把主进程刷爆。
+ *  - 窗口被遮挡/最小化时 Chromium 可能暂停 rAF,因此再加 50ms 定时兜底,避免"卡住不动";
+ *  - 抬起时必须先 flush 未发出的最后一次移动,否则同一帧内 按下→移动→抬起 会丢掉这次移动。 */
+function useFrameCoalesce() {
+  const pending = useRef(null)
+  const raf = useRef(0)
+  const timer = useRef(0)
+
+  const flush = () => {
+    if (raf.current) { cancelAnimationFrame(raf.current); raf.current = 0 }
+    if (timer.current) { clearTimeout(timer.current); timer.current = 0 }
+    const f = pending.current
+    pending.current = null
+    if (f) f()
+  }
+
+  useEffect(() => () => {
+    if (raf.current) cancelAnimationFrame(raf.current)
+    if (timer.current) clearTimeout(timer.current)
+  }, [])
+
+  const schedule = (fn) => {
+    pending.current = fn
+    if (raf.current || timer.current) return
+    raf.current = requestAnimationFrame(flush)
+    timer.current = setTimeout(flush, 50)
+  }
+
+  return [schedule, flush]
+}
+
+/** 拖动/缩放期间给 <body> 打标记:临时关掉元素过渡,避免窗口移动时元素"拖尾" */
+function setMoving(on) {
+  try { document.body.classList.toggle('dragging', !!on) } catch (e) { /* 忽略 */ }
+}
+
 export function useWindowDrag(which) {
   const st = useRef(null)
+  const [schedule, flush] = useFrameCoalesce()
   const onPointerDown = (e) => {
     if (e.button !== 0) return
     if (e.target.closest('button,input,select,textarea,a,label,.no-drag,.tip-wrap')) return
     st.current = { id: e.pointerId, x: e.screenX, y: e.screenY }
     try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
+    setMoving(true)
     call('drag_begin', which, e.screenX, e.screenY)
   }
   const onPointerMove = (e) => {
     if (!st.current || st.current.id !== e.pointerId) return
-    call('drag_move', which, e.screenX, e.screenY)
+    const x = e.screenX
+    const y = e.screenY
+    schedule(() => call('drag_move', which, x, y))
   }
   const end = () => {
     if (!st.current) return
     st.current = null
+    flush()                     // 先把最后一帧的位置发出去,再结束拖拽
+    setMoving(false)
     call('drag_end', which)
   }
   return {
@@ -278,21 +321,28 @@ const EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 
 export function ResizeHandles({ which, onStart, edges }) {
   const st = useRef(null)
+  const [schedule, flush] = useFrameCoalesce()
   const start = (edge) => (e) => {
     if (e.button !== 0) return
     st.current = { id: e.pointerId, edge }
     try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
     if (onStart) onStart()
+    setMoving(true)
     call('resize_begin', which, edge, e.screenX, e.screenY)
     e.preventDefault()
     e.stopPropagation()
   }
   const move = (e) => {
-    if (st.current && st.current.id === e.pointerId) call('resize_move', which, e.screenX, e.screenY)
+    if (!st.current || st.current.id !== e.pointerId) return
+    const x = e.screenX
+    const y = e.screenY
+    schedule(() => call('resize_move', which, x, y))
   }
   const end = () => {
     if (!st.current) return
     st.current = null
+    flush()                     // 同上:保证最后一次尺寸变化不会丢
+    setMoving(false)
     call('resize_end', which)
   }
   const common = { onPointerMove: move, onPointerUp: end, onPointerCancel: end, onLostPointerCapture: end }
@@ -476,7 +526,8 @@ export function DownloadHost({ children }) {
           </div>
           <div className="progress-track">
             <span className="progress-fill"
-                  style={{ width: `${prog.error ? 100 : prog.pct || 0}%`,
+                  style={{ width: '100%',
+                           transform: `scaleX(${Math.max(0, Math.min(100, prog.error ? 100 : prog.pct || 0)) / 100})`,
                            background: prog.error ? 'var(--c-danger)' : undefined }} />
           </div>
         </div>
