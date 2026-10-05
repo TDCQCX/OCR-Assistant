@@ -152,6 +152,64 @@ class AgentClient:
         """第二步:结合截图与 OCR 文字回答问题(prompt 已由调用方拼好)。"""
         return self._chat(prompt, image)
 
+    def list_models(self) -> tuple:
+        """按平台的 /models 接口拉取可用模型列表。
+
+        各家兼容 OpenAI 的网关普遍实现了 GET {base}/models;有的只给 /v1/models。
+        这里逐候选尝试,返回 (模型ID列表, 错误说明)。避免在 UI 线程里阻塞,调用方走线程。
+        """
+        base = (self.api_base or "").strip().rstrip("/")
+        if not base:
+            return [], "未填写 Base URL"
+        if not self.api_key:
+            return [], "未配置 API Key"
+        # 从 chat 地址回推 models 地址
+        cands = []
+        for tail in ("/chat/completions", "/messages", "/completions"):
+            if base.endswith(tail):
+                cands.append(base[: -len(tail)] + "/models")
+        cands.append(base + "/models")
+        if base.endswith("/v1"):
+            cands.append(base + "/models")
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        last = ""
+        seen = set()
+        for url in cands:
+            if url in seen:
+                continue
+            seen.add(url)
+            try:
+                resp = requests.get(url, headers=headers, timeout=min(self.timeout, 20))
+            except requests.RequestException as exc:
+                last = f"请求失败:{exc}"
+                continue
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                except Exception:
+                    last = "返回内容不是 JSON"
+                    continue
+                items = data.get("data") if isinstance(data, dict) else None
+                ids = []
+                if isinstance(items, list):
+                    for it in items:
+                        mid = it.get("id") if isinstance(it, dict) else (it if isinstance(it, str) else "")
+                        if mid:
+                            ids.append(str(mid))
+                if not ids and isinstance(data, dict) and isinstance(data.get("models"), list):
+                    ids = [str(m.get("name") or m.get("id")) for m in data["models"] if isinstance(m, dict)]
+                if ids:
+                    return sorted(set(ids)), ""
+                last = "接口未返回模型列表"
+                continue
+            if resp.status_code in (401, 403):
+                return [], f"API Key 无效或无权限({resp.status_code})"
+            if resp.status_code == 404:
+                last = "该地址没有 /models 接口"
+                continue
+            last = f"接口返回 {resp.status_code}"
+        return [], last or "无法获取模型列表"
+
     def test_connection(self) -> str:
         """最小化连通性测试:发送纯文本 ping,返回结果说明。"""
         if not self.api_key:

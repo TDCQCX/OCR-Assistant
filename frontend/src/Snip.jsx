@@ -50,8 +50,11 @@ export default function Snip() {
 
   const confirm = (action) => {
     if (!sel || sel.w < 8 || sel.h < 8) return
-    call('finish_snip', { x: sel.x, y: sel.y, w: sel.w, h: sel.h, dpr: window.devicePixelRatio, action },
-         question)
+    // 必须按后端签名传参:finish_snip(sel, action, question)。
+    // 曾把 action 塞进 sel 里、把提问当第二参,导致三个动作全部失效。
+    call('finish_snip',
+         { x: sel.x, y: sel.y, w: sel.w, h: sel.h, dpr: window.devicePixelRatio },
+         action, question)
   }
 
   const tr = cfg?.translate || {}
@@ -88,21 +91,28 @@ export default function Snip() {
               borderRadius: 4,
             }}
           />
-          {/* 尺寸提示 */}
+          {/* 尺寸提示:紧贴选区左上,上方放不下就翻到选区内部 */}
           <div
-            className="absolute px-2 py-1 rounded-ctl text-[12px] pointer-events-none"
-            style={{ left: sel.x, top: Math.max(0, sel.y - 30), background: 'var(--c-panel)', border: '1px solid var(--c-line)', color: 'var(--c-fg)' }}
+            className="absolute px-2 py-1 rounded-ctl text-[12px] pointer-events-none font-mono"
+            style={{
+              left: sel.x,
+              top: sel.y - 28 >= 0 ? sel.y - 28 : sel.y + 6,
+              background: 'var(--c-panel)', border: '1px solid var(--c-line)',
+              color: 'var(--c-fg)', boxShadow: 'var(--c-shadow-1)',
+            }}
           >
             {Math.round(sel.w)} × {Math.round(sel.h)}
           </div>
           {/* 操作条:识别 / 翻译 / 设为悬浮窗区域,并内嵌引擎开关与提问输入 */}
           <div
-            className="absolute rounded-card border shadow-xl p-2.5 space-y-2"
+            className="absolute rounded-card border p-2.5 space-y-2"
             style={{
-              left: Math.max(8, Math.min(sel.x, window.innerWidth - 560)),
-              top: Math.min(sel.y + sel.h + 8, window.innerHeight - 170),
-              width: 540,
+              // 宽度自适应窗口:宽屏更宽、窄屏收缩;整体夹在窗口内不溢出
+              width: Math.min(560, window.innerWidth - 20),
+              left: Math.max(8, Math.min(sel.x, window.innerWidth - Math.min(560, window.innerWidth - 20) - 10)),
+              top: Math.min(sel.y + sel.h + 10, window.innerHeight - 178),
               background: 'var(--c-panel)', borderColor: 'var(--c-line)',
+              boxShadow: 'var(--c-shadow-3)',
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
@@ -122,8 +132,8 @@ export default function Snip() {
               <LangPair languages={langs} source={tr.source_lang || '自动检测'} target={tr.target_lang || '中文'}
                         onChange={(s, t) => setTr({ source_lang: s, target_lang: t })} />
             </div>
-            <QBox value={question} onChange={setQuestion} rows={2}
-                  presets={cfg?.behavior?.question_presets} history={cfg?.behavior?.question_history}
+            <QBox value={question} onChange={setQuestion}
+                  onSubmit={() => confirm('run')}
                   placeholder="提问/指令(Enter 识别;留空则默认指令)" />
           </div>
         </>

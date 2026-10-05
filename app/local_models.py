@@ -13,6 +13,8 @@ import io
 import platform
 import shutil
 import sys
+import threading
+import time
 import zipfile
 from pathlib import Path
 
@@ -75,10 +77,81 @@ class ModelMissing(Exception):
         self.message = message
 
 
-def _dir_size(path: Path) -> float:
-    if not path.exists():
+# 目录体积缓存:路径 -> (时间戳, MB, 是否精确值)。
+# models/ 下实测有 3492 个文件(其中 models/runtime/hf 就占 3439,是 pip 依赖树),
+# 递归 stat 一次 300ms 以上;而界面读一次端侧状态会问好几处体积,累计能把 UI 卡住几秒
+# (切到「识别历史」页时最明显,实测约 4s)。
+_DIR_SIZE_CACHE: dict = {}
+_DIR_SIZE_TTL = 30.0             # 精确值的有效期(秒)
+_DIR_SIZE_FAST_ENTRIES = 60      # 首屏估算的遍历上限(要足够小,首屏才不会卡)
+_DIR_SIZE_REFRESHING: set = set()
+
+
+def _walk_size(path: Path, limit: int) -> tuple:
+    """遍历目录累计字节数,最多看 limit 个文件。返回 (字节数, 是否被截断)。"""
+    total = 0
+    seen = 0
+    truncated = False
+    try:
+        for f in path.rglob("*"):
+            try:
+                if f.is_file():
+                    total += f.stat().st_size
+                    seen += 1
+            except OSError:
+                continue
+            if seen >= limit:
+                truncated = True
+                break
+    except OSError:
+        pass
+    return total, truncated
+
+
+def _refresh_size_bg(path: Path, key: str) -> None:
+    """后台把估算值刷新成精确值(不阻塞界面)。"""
+    try:
+        total, _ = _walk_size(path, 10 ** 9)
+        _DIR_SIZE_CACHE[key] = (time.time(), round(total / 1048576, 1), True)
+    except Exception:
+        pass
+    finally:
+        _DIR_SIZE_REFRESHING.discard(key)
+
+
+def _dir_size(path: Path, *, use_cache: bool = True) -> float:
+    """目录体积(MB),用于界面展示。
+
+    策略:先用少量条目快速估算并立刻返回(界面永不卡),同时后台跑一次完整统计,
+    完成后替换为精确值。体积只是展示信息,不需要阻塞等待。
+    """
+    try:
+        key = str(path)
+    except Exception:
         return 0.0
-    return round(sum(f.stat().st_size for f in path.rglob("*") if f.is_file()) / 1048576, 1)
+    if not path.exists():
+        _DIR_SIZE_CACHE.pop(key, None)
+        return 0.0
+    now = time.time()
+    if use_cache:
+        hit = _DIR_SIZE_CACHE.get(key)
+        if hit and (hit[2] or now - hit[0] < 3.0):     # 精确值长缓存;估算值只挡重复调用
+            return hit[1]
+
+    total, truncated = _walk_size(path, _DIR_SIZE_FAST_ENTRIES)
+    mb = round(total / 1048576, 1)
+    if use_cache:
+        _DIR_SIZE_CACHE[key] = (now, mb, not truncated)
+        if truncated and key not in _DIR_SIZE_REFRESHING:
+            _DIR_SIZE_REFRESHING.add(key)
+            threading.Thread(target=_refresh_size_bg, args=(path, key), daemon=True,
+                             name="dir-size").start()
+    return mb
+
+
+def invalidate_size_cache() -> None:
+    """模型被下载/删除后清空体积缓存(下次读取重新统计)。"""
+    _DIR_SIZE_CACHE.clear()
 
 
 def _download(url: str, progress=None, base=0, span=100, label="下载中") -> bytes:
@@ -102,20 +175,6 @@ def ocr_status() -> dict:
     return {"ready": not missing, "dir": str(OCR_DIR), "missing": missing, "size_mb": _dir_size(OCR_DIR)}
 
 
-def ocr_model_paths() -> dict:
-    """用户已下载的优先,其次内置包内模型(源码环境)。"""
-    if ocr_status()["ready"]:
-        return {"det": str(OCR_DIR / OCR_FILES["det"]), "rec": str(OCR_DIR / OCR_FILES["rec"]),
-                "cls": str(OCR_DIR / OCR_FILES["cls"])}
-    spec = importlib.util.find_spec("rapidocr_onnxruntime")
-    if spec and spec.origin:
-        bundled = Path(spec.origin).parent / "models"
-        if all((bundled / n).exists() for n in OCR_FILES.values()):
-            return {"det": str(bundled / OCR_FILES["det"]), "rec": str(bundled / OCR_FILES["rec"]),
-                    "cls": str(bundled / OCR_FILES["cls"])}
-    return {}
-
-
 def _pypi_wheel_url(pkg: str, prefer: str = "") -> str:
     meta = requests.get(f"https://pypi.org/pypi/{pkg}/json", timeout=TIMEOUT).json()
     wheels = [u for u in (meta.get("urls") or []) if u["filename"].endswith(".whl")]
@@ -128,27 +187,6 @@ def _pypi_wheel_url(pkg: str, prefer: str = "") -> str:
     return pool[0]["url"]
 
 
-def download_ocr(progress=None) -> str:
-    progress = progress or (lambda pct, text: None)
-    OCR_DIR.mkdir(parents=True, exist_ok=True)
-    progress(2, "正在解析下载地址…")
-    data = _download(_pypi_wheel_url("rapidocr_onnxruntime"), progress, 5, 85, "正在下载 OCR 模型包…")
-    progress(92, "正在解压模型…")
-    count = 0
-    with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        for info in zf.infolist():
-            name = Path(info.filename).name
-            if name in OCR_FILES.values():
-                with zf.open(info) as src, open(OCR_DIR / name, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-                count += 1
-    if count < len(OCR_FILES):
-        raise ModelMissing("ocr", f"模型包内容不完整(找到 {count} 个模型文件)")
-    progress(100, "OCR 端侧模型已就绪")
-    return f"OCR 端侧模型下载完成({_dir_size(OCR_DIR)}MB)"
-
-
-# ================= 翻译运行时(CTranslate2) =================
 def runtime_installed() -> bool:
     if importlib.util.find_spec("ctranslate2") is not None and \
             importlib.util.find_spec("sentencepiece") is not None:
@@ -207,14 +245,37 @@ def _mt_url(src: str, dst: str) -> str:
     return ""
 
 
+def _find_pair_dir(dst: str = "") -> Path:
+    """在语言对目录里找一个可用的模型目录(源语言未知时用)。
+
+    关键修复:来源语言选「自动检测」时 src 解析为空,原来会把目录拼成 models/mt/x-zh
+    这种不存在的路径,于是无论用户下没下模型,都报告"未就绪",前端就一直弹下载框
+    —— 这正是"选了模型还是切不到本地"的直接原因。现在回退到已下载的任意语言对。
+    """
+    if dst:
+        exact = MT_DIR / f"en-{dst}"
+        if (exact / "model.bin").exists():
+            return exact
+    return _light_pair_dir()
+
+
 def mt_status(source_lang: str, target_lang: str) -> dict:
+    """某个语言对的端侧模型状态。
+
+    来源语言为「自动检测」时不做语言对存在性判断:端侧引擎本来就会自行侦测源语言,
+    只要本机有任意可用的语言对模型就算就绪。
+    """
     src, dst = _mt_codes(source_lang, target_lang)
     d = mt_dir(source_lang, target_lang)
+    # 源语言未知 → 回退到实际可用的语言对目录
+    if not src and not d.exists():
+        d = _find_pair_dir(dst)
     missing = [f for f in MT_LOCAL_FILES if not (d / f).exists()]
+    ok = not missing
     return {
-        "ready": bool(src and dst) and not missing,
-        "supported": bool(src and dst) and (bool(MT_PACKAGES.get((src, dst))) or True),
-        "pair": f"{src}->{dst}",
+        "ready": ok,
+        "supported": bool(dst),
+        "pair": f"{src or '自动'}->{dst or '?'}",
         "dir": str(d),
         "missing": missing,
         "size_mb": _dir_size(d),
@@ -259,6 +320,7 @@ def download_mt(source_lang: str, target_lang: str, progress=None) -> str:
 
 # ================= 汇总 / 删除 =================
 def summary() -> dict:
+    """端侧模型总览。体积走 _dir_size 的 TTL 缓存,避免每次界面刷新都遍历几千个文件。"""
     return {"root": str(MODEL_ROOT), "ocr": ocr_status(), "mt": mt_status("中文", "英语"),
             "runtime": runtime_status(), "total_mb": _dir_size(MODEL_ROOT)}
 
@@ -397,6 +459,7 @@ def remove_mt_tier(tier: str) -> str:
     d = MT_TIER_DIR / tier
     if d.exists():
         shutil.rmtree(d, ignore_errors=True)
+        invalidate_size_cache()
         return f'已删除翻译 {tier} 档模型'
     return '该档位没有已下载的模型'
 
@@ -535,7 +598,8 @@ def download_hf_runtime(progress=None) -> str:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             zf.extractall(HF_RUNTIME_DIR)
     progress(100, "端侧大模型运行时已就绪")
-    return f"运行时下载完成({_dir_size(HF_RUNTIME_DIR)}MB)"
+    invalidate_size_cache()
+    return f"运行时下载完成({_dir_size(HF_RUNTIME_DIR, use_cache=False)}MB)"
 
 
 def hf_runtime_status() -> dict:
@@ -550,14 +614,21 @@ def remove_hf_mt(tier: str) -> str:
     d = HF_MT_DIR / tier
     if d.exists():
         shutil.rmtree(d, ignore_errors=True)
+        invalidate_size_cache()
         return f"已删除翻译 {tier} 档(官方模型)"
     return "该档位没有已下载的模型"
+
+
+def invalidate_size_cache() -> None:
+    """模型被下载/删除后清空体积缓存(下次读取重新统计)。"""
+    _DIR_SIZE_CACHE.clear()
 
 
 def remove_ocr_tier(tier: str) -> str:
     d = OCR_DIR / tier
     if d.exists():
         shutil.rmtree(d, ignore_errors=True)
+        invalidate_size_cache()
         return f"已删除 OCR {tier} 档模型"
     return "该档位没有已下载的模型"
 
@@ -628,6 +699,35 @@ def _light_pair_dir() -> Path:
         if d.is_dir() and d.name != "tier" and (d / "model.bin").exists():
             return d
     return MT_DIR / "en-zh"
+
+
+def mt_current_model() -> tuple:
+    """当前翻译档位对应的 (tier, 模型目录)。
+
+    注意:这个函数曾被误删,而 app/local_mt.py 一直在调用它,导致端侧翻译既判不出
+    可用性、也无法加载模型(表现为"选了模型还是切不到本地")。这里按现行分档结构实现:
+      * kind == "hf"(均衡/全量):模型在 models/mt/hf/<tier>
+      * 轻量档:模型在语言对目录,如 models/mt/en-zh
+    """
+    tier = get_mt_tier()
+    info = mt_tier_info(tier)
+    if info.get("kind") == "hf":
+        d = HF_MT_DIR / tier
+        return tier, (d if d.exists() else None)
+    d = _light_pair_dir()
+    return tier, (d if d.exists() else None)
+
+
+def mt_current_ready() -> bool:
+    """当前端侧翻译档位是否已就绪(与语言对无关,供"能否切到本地"判断)。"""
+    tier, d = mt_current_model()
+    if d is None:
+        return False
+    info = mt_tier_info(tier)
+    if info.get("kind") == "hf":
+        return (d / "config.json").exists() and (
+            (d / "model.safetensors").exists() or (d / "pytorch_model.bin").exists())
+    return (d / "model.bin").exists()
 
 
 def get_mt_tier() -> str:

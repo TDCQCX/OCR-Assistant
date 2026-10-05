@@ -22,7 +22,7 @@ RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", ROOT)) if getattr(sys, "frozen", F
 ICON_PATH = RESOURCE_ROOT / "assets" / "app.ico"   # 窗口/任务栏图标(与 exe 图标同源)
 
 # 程序版本的唯一来源:界面「关于」页、exe 属性、文档均以此为准
-APP_VERSION = "2.6.3"
+APP_VERSION = "2.6.10"
 
 DEFAULT_OCR_PROMPT = (
     "你是一个高精度OCR文字识别引擎。请仔细观察这张截图,识别图中所有可见的文字内容,"
@@ -163,6 +163,12 @@ DEFAULT_CONFIG = {
         "guideDone": {},               # 新手教程:各模式是否已完成引导(overlay/mini/translate/settings/snip)
         "holeStyle": "dashed",         # solid / dashed / dotted
         "holeRadius": 4,               # 洞口边框圆角
+        # 自定义图片背景(仅作用于面板与设置/翻译页底色,不遮挡悬浮窗洞口)
+        "bgImage": "",                 # 图片文件 URI(file:///...),空=不使用
+        "bgImageOpacity": 100,         # 背景图不透明度(%)
+        "bgImageBlur": 0,              # 背景图模糊(px)
+        "bgImageFit": "cover",         # cover / contain / repeat
+        "bgImageDim": 0,               # 背景图上方压暗/压亮程度(0-80)
     },
     "window": {
         "always_on_top": True,
@@ -170,7 +176,7 @@ DEFAULT_CONFIG = {
         "height": 680,
         "x": None,                     # 悬浮窗位置(拖动后自动记忆)
         "y": None,
-        "miniWidth": 420,              # 迷你条尺寸(图标行 + 提问输入行)
+        "miniWidth": 640,              # 迷你条宽度(下限 640:保证右上角控件不被挤出)
         "miniHeight": 78,
         "mini_x": None,                # 迷你条位置;为空时首次进入自动居中于任务栏上方
         "mini_y": None,
@@ -182,7 +188,7 @@ DEFAULT_CONFIG = {
         # 各模式"恢复默认尺寸"用(与用户当前尺寸分离,便于切换模式时回到默认大小)
         # 迷你条高度是「内容决定」的:实际值由前端实测后写入 miniHeight,这里只是兜底值
         "defaultWidth": 640, "defaultHeight": 680,
-        "defaultMiniWidth": 420, "defaultMiniHeight": 94,
+        "defaultMiniWidth": 640, "defaultMiniHeight": 94,
         "defaultTranslateWidth": 760, "defaultTranslateHeight": 620,     # 翻译窗口默认不置顶(避免遮挡待翻译内容)
         "holeWidth": None,             # 洞口(OCR 区域)尺寸
         "holeHeight": None,
@@ -217,8 +223,15 @@ DEFAULT_CONFIG = {
     },
     "knowledge": [],                   # 本地知识库:[{keys:[...], answer, detail}]
     "hotkeys": {
-        "capture": "ctrl+f1",          # 截图并识别
+        # 全部可在「设置 → 常规设置 → 行为与快捷键」中修改,输入框为按键监听(按下即显示)
+        "capture": "ctrl+f1",          # 截图并识别(悬浮窗识别洞口内容)
+        "snip": "ctrl+shift+a",        # 进入自由框选(全屏遮罩)
         "exit": "ctrl+q",              # 退出程序
+        "modeOverlay": "ctrl+1",       # 切到悬浮窗模式
+        "modeMini": "ctrl+2",          # 切到迷你条模式
+        "modeSnip": "ctrl+3",          # 切到自由框选
+        "modeTranslate": "ctrl+4",     # 切到翻译模式
+        "topmost": "ctrl+t",           # 切换窗口置顶
     },
     "behavior": {
         "default_question": "请回答识别到的内容",        # 示例提问(界面下拉可选,可在设置中编辑)

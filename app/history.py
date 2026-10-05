@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""识别历史:保存最近若干条识别结果,供「识别历史」页展示。"""
+"""识别历史:保存最近若干条识别结果,供「识别历史」页展示(上限 MAX_ITEMS)。"""
 import json
 import time
 from pathlib import Path

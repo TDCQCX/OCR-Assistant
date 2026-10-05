@@ -91,7 +91,7 @@ class PipelineWorker(threading.Thread):
             self._on_result(self._result(ocr_text, parse_question(ocr_text), "", "", "翻译",
                                          ocr_time, 0.0,
                                          {"pairs": [], "src_lang": src_lang, "dst_lang": dst_lang,
-                                          "display": display, "engine": "—"}))
+                                          "display": display, "engine": "—", "segments": 0}))
             return
 
         parsed = parse_question(ocr_text)
@@ -130,7 +130,7 @@ class PipelineWorker(threading.Thread):
                             ocr_time, answer_time,
                             {"pairs": pairs, "src_lang": src_lang, "dst_lang": dst_lang,
                              "display": display, "engine": engine_name,
-                             "mode": engine_mode})
+                             "mode": engine_mode, "segments": len(segments)})
         history.append(data)
         self._on_result(data)
 

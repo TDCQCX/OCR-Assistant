@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { call } from './bridge'
 import { useApp } from './main'
 import Guide, { useGuide } from './Guide'
-import { applyTheme, resolveTheme, PRESETS, COLOR_FIELDS } from './theme'
+import { applyTheme, applyBackgroundImage, resolveTheme, PRESETS, COLOR_FIELDS, BG_FITS } from './theme'
 import { Btn, Card, ColorInput, Field, Icon, IconBtn, Logo, ModelTiers, Segmented, Switch, useToast } from './ui'
 
 const NAV = [
@@ -20,22 +20,24 @@ export default function Settings() {
   const [page, setPage] = useState('model')
   const guide = useGuide('settings')
   return (
-    <div className="h-full flex gap-3 p-3" style={{ background: 'var(--c-bg)' }}>
+    <div className="h-full flex gap-3.5 p-3.5" style={{ background: 'var(--c-bg)' }}>
       {/* 左侧导航 */}
-      <aside className="w-[168px] shrink-0 flex flex-col gap-1.5" data-guide="set-nav">
-        <div className="flex items-center gap-2 px-1.5 pb-2">
+      <aside className="w-[176px] settings-aside gap-1 p-2" data-guide="set-nav">
+        <div className="flex items-center gap-2 px-1.5 py-1.5 mb-1 border-b" style={{ borderColor: 'var(--c-line)' }}>
           <Logo size={26} />
           <div className="min-w-0">
-            <div className="font-semibold text-[14px] leading-tight">OCR 助手</div>
+            <div className="font-semibold text-[14px] leading-tight truncate">OCR 助手</div>
             <div className="hint leading-tight">v{app.version}</div>
           </div>
         </div>
+        <div className="hint px-1.5 pb-1">设置(自动保存)</div>
         {NAV.map((n) => {
           const active = page === n.key
           return (
             <button
               key={n.key}
               onClick={() => setPage(n.key)}
+              aria-current={active ? 'page' : undefined}
               className={`nav-item ${active ? 'nav-item-active' : ''}`}
             >
               <Icon name={n.icon} size={16} />
@@ -43,23 +45,142 @@ export default function Settings() {
             </button>
           )
         })}
-        <span className="flex-1" />
-        <span data-guide="set-save" className="block">
+        <span className="flex-1 min-h-2" />
+        <span data-guide="set-save" className="block px-0.5 pb-0.5">
           <Btn primary icon="check" className="w-full" onClick={() => call('close_settings')}>关闭并保存</Btn>
         </span>
       </aside>
 
-      {/* 右侧内容 */}
-      <main className="flex-1 min-w-0 overflow-auto pr-1">
-        {page === 'model' && <ModelPage />}
-        {page === 'general' && <GeneralPage />}
-        {page === 'translate' && <TranslatePage />}
-        {page === 'appearance' && <AppearancePage />}
-        {page === 'history' && <HistoryPage />}
-        {page === 'about' && <AboutPage />}
-        {page === 'guide' && <GuidePage onGoPage={setPage} />}
+      {/* 右侧内容:滚动只发生在内容区内部;模型页自己管理两个栏的滚动(问题1) */}
+      <main className="flex-1 min-w-0 h-full">
+        <div
+          key={page}
+          className={`page-enter h-full ${page === 'model' ? 'overflow-hidden' : 'overflow-auto pr-1'}`}
+        >
+          {page === 'model' && <ModelPage />}
+          {page === 'general' && <GeneralPage />}
+          {page === 'translate' && <TranslatePage />}
+          {page === 'appearance' && <AppearancePage />}
+          {page === 'history' && <HistoryPage />}
+          {page === 'about' && <AboutPage />}
+          {page === 'guide' && <GuidePage onGoPage={setPage} />}
+        </div>
       </main>
       <Guide mode="settings" open={guide.open} onClose={guide.stop} />
+    </div>
+  )
+}
+
+/* ======================= 模型 ID 下拉输入 ======================= */
+/**
+ * 模型 ID 输入(问题2)。
+ *
+ * 旧实现用 <input list> + <datalist>:在 QtWebEngine 下点击输入框并不会展开候选,
+ * 用户以为"下拉不起作用"。这里改成自绘下拉:输入框可以自由输入,右侧按钮/聚焦展开
+ * 候选列表,支持键盘上下选择与回车确认。
+ */
+function ModelIdInput({ value, options = [], onChange, onFetch, fetching, placeholder, autoOpen }) {
+  const [open, setOpen] = useState(!!autoOpen)
+  const [hint, setHint] = useState(-1)
+  const box = useRef(null)
+  // 候选列表:输入框里有内容时,把匹配项排到最前,但**不隐藏其它候选** ——
+  // 之前用 `hit.length ? hit : options`,已填值时会只剩它自己,表现为"拉到 2 个只显示 1 个"。
+  const filtered = useMemo(() => {
+    const q = (value || '').trim().toLowerCase()
+    if (!q) return options
+    const hit = options.filter((m) => m.toLowerCase().includes(q))
+    const rest = options.filter((m) => !m.toLowerCase().includes(q))
+    return [...hit, ...rest]
+  }, [options, value])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const onDoc = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  useEffect(() => { setHint(-1) }, [open, value])
+
+  const pick = (m) => { onChange(m); setOpen(false) }
+
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!filtered.length) return
+      e.preventDefault()
+      if (!open) { setOpen(true); return }
+      setHint((i) => {
+        const next = e.key === 'ArrowDown' ? i + 1 : i - 1
+        return (next + filtered.length) % filtered.length
+      })
+    } else if (e.key === 'Enter') {
+      if (open && hint >= 0 && filtered[hint]) { e.preventDefault(); pick(filtered[hint]) }
+      else setOpen(false)
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div ref={box} className="relative">
+      <div className="flex gap-2">
+        <input
+          className="ctl"
+          value={value}
+          placeholder={placeholder || '例如 qwen-vl-max / deepseek-chat / gpt-4o-mini'}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => { if (options.length) setOpen(true) }}
+          onKeyDown={onKey}
+          role="combobox"
+          aria-expanded={open}
+          aria-autocomplete="list"
+        />
+        <button
+          type="button"
+          className="btn shrink-0"
+          disabled={!options.length}
+          onClick={() => setOpen((o) => !o)}
+          aria-label="展开常用模型"
+          title={options.length ? '展开常用模型' : '该平台暂无预设模型'}
+        >
+          <Icon name="chevronDown" size={15} />
+        </button>
+        {onFetch && (
+          <button
+            type="button"
+            className="btn shrink-0"
+            disabled={!!fetching}
+            onClick={onFetch}
+            title="按上方 Base URL 从接口拉取该平台可用的模型列表"
+            aria-label="从接口拉取模型列表"
+          >
+            <Icon name="cloud" size={15} className={fetching ? 'animate-spin' : ''} />
+            {fetching ? '拉取中…' : '拉取'}
+          </button>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="model-menu anim-pop" role="listbox">
+          <div className="model-menu-title">常用模型(点击填入,也可直接输入)</div>
+          {filtered.map((m, i) => (
+            <button
+              key={m}
+              type="button"
+              role="option"
+              aria-selected={m === value}
+              className="model-menu-item"
+              data-on={m === value ? '1' : '0'}
+              data-hint={hint === i ? '1' : '0'}
+              onMouseEnter={() => setHint(i)}
+              onClick={() => pick(m)}
+            >
+              <Icon name="chip" size={13} />
+              <span className="truncate">{m}</span>
+              {m === value && <Icon name="check" size={13} className="ml-auto shrink-0" />}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -78,6 +199,9 @@ function ModelPage() {
   const [tpl, setTpl] = useState('')
   const [activeId, setActiveId] = useState('')
   const [models, setModels] = useState([])
+  const [fetched, setFetched] = useState([])      // 从接口拉取到的模型
+  const [fetching, setFetching] = useState(false)
+  const [forceOpen, setForceOpen] = useState(0)   // 递增:请求下拉展开一次
 
   const reload = async (keep) => {
     const r = await call('list_providers')
@@ -92,8 +216,29 @@ function ModelPage() {
     setForm(f.provider)
     setPreview(f.preview)
     setModels(f.models || [])
+    setFetched([])                 // 换平台时清掉上一家的拉取结果
   }
   useEffect(() => { reload() }, [])
+
+  // 接口拉取结果由后端异步推送(models 事件)
+  useEffect(() => {
+    const onEvent = (e) => {
+      const ev = e.detail
+      if (ev.type !== 'models') return
+      setFetching(!!ev.pending)
+      if (ev.pending) return
+      const list = ev.list || []
+      setFetched(list)
+      if (ev.ok && list.length) {
+        setForceOpen((n) => n + 1)      // 让下拉自动展开,直接看到拉取结果
+        toast(`已拉取 ${list.length} 个模型,点选即可填入`)
+      } else {
+        toast(ev.message || '未能拉取模型列表', 'danger')
+      }
+    }
+    window.addEventListener('ocr-event', onEvent)
+    return () => window.removeEventListener('ocr-event', onEvent)
+  }, [])
 
   const patch = async (field, value) => {
     setForm((f) => ({ ...f, [field]: value }))
@@ -201,19 +346,20 @@ function ModelPage() {
   if (!form) return <div className="hint">加载中…</div>
 
   return (
-    <div className="flex gap-3 h-full">
-      {/* 平台管理 */}
-      <div className="w-[212px] shrink-0 flex flex-col gap-2">
-        <div className="flex items-center gap-2 px-0.5">
+    <div className="flex gap-3.5 h-full min-h-0">
+      {/* 平台管理(问题1):这一栏固定在窗口中,只有它自己的平台列表在超出时内部滚动,
+          不会跟着右侧表单一起滚走 */}
+      <div className="w-[228px] settings-column gap-2 p-2.5 h-full">
+        <div className="flex items-center gap-2 px-0.5 shrink-0">
           <Icon name="chip" size={15} className="text-accent" />
           <span className="font-semibold">AI 平台管理</span>
           <span className="flex-1" />
         </div>
-        <div className="hint px-1 leading-snug">
+        <div className="hint px-1 leading-snug shrink-0">
           右侧圆点 = <span style={{ color: 'var(--c-accent)' }}>当前使用</span>的平台;点圆点即可切换。
           未填 Key 的平台不可选中。
         </div>
-        <div className="flex-1 overflow-auto space-y-1.5 pr-1">
+        <div className="settings-column-scroll space-y-1.5">
           {configured.length > 0 && <div className="hint px-1">已配置({configured.length})</div>}
           {configured.map((p) => <Item key={p.id} p={p} i={list.indexOf(p)} />)}
           {unconfigured.length > 0 && <div className="hint px-1 pt-1">未配置({unconfigured.length})</div>}
@@ -232,8 +378,8 @@ function ModelPage() {
         <Btn icon="plus" onClick={async () => { await call('provider_add'); reload(list.length) }}>自定义平台</Btn>
       </div>
 
-      {/* 表单 */}
-      <div className="flex-1 min-w-0 space-y-3 overflow-auto pr-1">
+      {/* 表单:只有这一栏滚动(问题1) */}
+      <div className="flex-1 min-w-0 space-y-3.5 overflow-auto pr-1 h-full">
         <Card>
           <div className="flex items-center gap-3">
             <span className="w-10 h-10 rounded-card grid place-items-center text-[17px] font-bold shrink-0"
@@ -255,7 +401,7 @@ function ModelPage() {
           </div>
         </Card>
 
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <Field label="API Key">
             <div className="relative">
               <input
@@ -271,32 +417,19 @@ function ModelPage() {
               </span>
             </div>
           </Field>
-          <Field label="模型 ID" hint={models.length ? '可下拉选择常用模型,也可直接输入' : '该平台请手动填写模型 ID'}>
-            <div className="space-y-1.5">
-              <input className="ctl" list="model-presets" value={form.model || ''}
-                     placeholder="例如 qwen-vl-max / deepseek-chat / gpt-4o-mini"
-                     onChange={(e) => patch('model', e.target.value)} />
-              <datalist id="model-presets">
-                {models.map((m) => <option key={m} value={m} />)}
-              </datalist>
-              {models.length > 0 && (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="hint shrink-0">常用:</span>
-                  {models.map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => patch('model', m)}
-                      className="chip no-drag transition-colors"
-                      style={form.model === m
-                        ? { borderColor: 'var(--c-accent)', color: 'var(--c-accent)', background: 'var(--c-accent-soft)' }
-                        : undefined}
-                      title="点击填入该模型 ID"
-                    >{m}</button>
-                  ))}
-                </div>
-              )}
-            </div>
+          <Field label="模型 ID" hint={models.length ? '可从下拉选择常用模型,也可直接输入' : '该平台请手动填写模型 ID'}>
+            <ModelIdInput
+              key={`mid-${idx}-${forceOpen}`}
+              value={form.model || ''}
+              options={fetched.length ? fetched : models}
+              fetching={fetching}
+              autoOpen={!!forceOpen}
+              onChange={(v) => patch('model', v)}
+              onFetch={async () => {
+                setFetching(true)
+                await call('fetch_provider_models', idx)
+              }}
+            />
           </Field>
           <Field label="Base URL">
             <div className="flex gap-2">
@@ -348,6 +481,154 @@ function ModelPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** 滑杆 + 数值(设置页统一控件) */
+function SliderRow({ value, min, max, step = 1, onChange, suffix = '' }) {
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range" className="flex-1" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(+e.target.value)}
+      />
+      <span className="hint w-12 text-right tabular-nums">{value}{suffix}</span>
+    </div>
+  )
+}
+
+/* ======================= 快捷键录入(问题5) ======================= */
+/** 后端默认值(用于「恢复默认」);与 app/config.py 的 DEFAULT_CONFIG.hotkeys 保持一致 */
+const cfgmodDefaults = {
+  capture: 'ctrl+f1',
+  snip: 'ctrl+shift+a',
+  modeOverlay: 'ctrl+1',
+  modeMini: 'ctrl+2',
+  modeSnip: 'ctrl+3',
+  modeTranslate: 'ctrl+4',
+  topmost: 'ctrl+t',
+  exit: 'ctrl+q',
+}
+
+const HOTKEY_FIELDS = [
+  ['capture', '识别(截图并识别)', '悬浮窗模式抓取洞口内容;迷你条模式下直接进入框选'],
+  ['snip', '自由截图/框选', '进入全屏遮罩拖拽框选'],
+  ['modeOverlay', '切到悬浮窗', ''],
+  ['modeMini', '切到迷你条', ''],
+  ['modeSnip', '切到自由框选', '与「自由截图」同一个目标,可分别设置'],
+  ['modeTranslate', '切到翻译模式', ''],
+  ['topmost', '切换窗口置顶', '一次按下在置顶/取消置顶之间切换'],
+  ['exit', '退出程序', '按退出方式设置处理(询问/托盘/直接退出)'],
+]
+
+const MOD_KEYS = new Set(['Control', 'Alt', 'Shift', 'Meta', 'AltGraph', 'CapsLock', 'NumLock', 'ScrollLock'])
+
+/** 把 KeyboardEvent 转成后端 keyboard 库认识的组合键串(如 ctrl+shift+a)。 */
+export function comboFromEvent(e) {
+  const mods = []
+  if (e.ctrlKey) mods.push('ctrl')
+  if (e.altKey) mods.push('alt')
+  if (e.shiftKey) mods.push('shift')
+  if (e.metaKey) mods.push('win')
+  const key = normalizeKey(e)
+  if (!key) return ''                    // 只按了修饰键:继续等待
+  return [...mods, key].join('+')
+}
+
+function normalizeKey(e) {
+  const k = e.key
+  if (!k || MOD_KEYS.has(k)) return ''
+  if (k === ' ') return 'space'
+  if (k === 'Escape') return 'esc'
+  if (k === 'ArrowUp') return 'up'
+  if (k === 'ArrowDown') return 'down'
+  if (k === 'ArrowLeft') return 'left'
+  if (k === 'ArrowRight') return 'right'
+  if (k === 'Enter') return 'enter'
+  if (k === 'Tab') return 'tab'
+  if (k === 'Backspace') return 'backspace'
+  if (k === 'Delete') return 'delete'
+  if (k === 'Home') return 'home'
+  if (k === 'End') return 'end'
+  if (k === 'PageUp') return 'page up'
+  if (k === 'PageDown') return 'page down'
+  if (k === 'Insert') return 'insert'
+  if (k === 'PrintScreen') return 'print screen'
+  if (k.startsWith('F') && /^F\d{1,2}$/.test(k)) return k.toLowerCase()
+  // 字母/数字/标点:统一小写
+  if (k.length === 1) return k.toLowerCase()
+  return k.toLowerCase()
+}
+
+/** 组合键展示:ctrl+shift+a -> Ctrl + Shift + A */
+export function prettyCombo(combo) {
+  if (!combo) return '未设置'
+  return combo.split('+').map((p) => {
+    const t = p.trim()
+    if (!t) return t
+    if (t.length === 1) return t.toUpperCase()
+    return t.charAt(0).toUpperCase() + t.slice(1)
+  }).join(' + ')
+}
+
+/**
+ * 快捷键录入框(问题5):聚焦后进入"监听"状态,按下组合键实时显示。
+ * 不依赖文本框输入,彻底避免"用户手动敲字符串"造成的格式错误。
+ */
+function HotkeyInput({ value, defaultValue, onChange }) {
+  const [listening, setListening] = useState(false)
+  const [preview, setPreview] = useState('')
+  const onKeyDown = (e) => {
+    if (!listening) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      onChange('')
+      setPreview('')
+      setListening(false)
+      return
+    }
+    if (e.key === 'Escape') {
+      setPreview('')
+      setListening(false)
+      return
+    }
+    const combo = comboFromEvent(e)
+    if (!combo) { setPreview(''); return }   // 只按修饰键:显示"等待主键"
+    const mods = []
+    if (e.ctrlKey) mods.push('Ctrl')
+    if (e.altKey) mods.push('Alt')
+    if (e.shiftKey) mods.push('Shift')
+    if (e.metaKey) mods.push('Win')
+    setPreview([...mods, ...(combo.split('+').slice(mods.length)).map((p) => p.toUpperCase())].join(' + '))
+    onChange(combo)
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        className={`hotkey-box ${listening ? 'hotkey-box-listening' : ''}`}
+        onClick={() => { setListening(true); setPreview('') }}
+        onBlur={() => { setListening(false); setPreview('') }}
+        onKeyDown={onKeyDown}
+      >
+        {listening
+          ? <span className="hotkey-live">{preview || '请按下组合键…'}</span>
+          : <span className="font-mono text-[12.5px]">{prettyCombo(value)}</span>}
+      </button>
+      {listening && (
+        <span className="hint shrink-0 flex items-center gap-1">
+          <Icon name="info" size={12} />按下即生效
+        </span>
+      )}
+      <span className="flex-1" />
+      <Btn
+        className="!h-7 !text-[12px] shrink-0"
+        disabled={!defaultValue || value === defaultValue}
+        onClick={() => onChange(defaultValue)}
+        title="恢复该快捷键的默认值"
+      >恢复默认</Btn>
     </div>
   )
 }
@@ -433,11 +714,19 @@ function GeneralPage() {
                    onBlur={(e) => set('behavior.default_question', e.target.value)}
                    onChange={(e) => setLocal({ ...local, behavior: { ...local.behavior, default_question: e.target.value } })} />
           </Field>
-          {[['capture', '截图并识别'], ['snip', '自由截图'], ['exit', '退出程序']].map(([k, label]) => (
-            <Field key={k} label={`${label} 快捷键`}>
-              <input className="ctl !w-40" value={local.hotkeys?.[k] || ''}
-                     onChange={(e) => setLocal({ ...local, hotkeys: { ...local.hotkeys, [k]: e.target.value } })}
-                     onBlur={(e) => set('hotkeys.' + k, e.target.value)} />
+          <div className="hint px-1">
+            点右侧输入框后「直接按下」组合键即可录入(实时显示);Backspace 清除,禁用某些键请留空。
+          </div>
+          {HOTKEY_FIELDS.map(([k, label, hint]) => (
+            <Field key={k} label={label} hint={hint} width={150}>
+              <HotkeyInput
+                value={local.hotkeys?.[k] || ''}
+                defaultValue={cfgmodDefaults[k] || ''}
+                onChange={(v) => {
+                  setLocal({ ...local, hotkeys: { ...local.hotkeys, [k]: v } })
+                  set('hotkeys.' + k, v)
+                }}
+              />
             </Field>
           ))}
         </div>
@@ -646,8 +935,10 @@ function AppearancePage() {
   const [draft, setDraft] = useState(ui.customTheme || resolveTheme(ui))
 
   const setUi = (patch) => {
+    const next = { ...ui, ...patch }
     app.setUi(patch)
-    applyTheme(resolveTheme({ ...ui, ...patch }), { ...ui, ...patch })
+    applyTheme(resolveTheme(next), next)
+    applyBackgroundImage(next)      // 图片背景即时预览(问题3)
   }
 
   const pickPreset = (key) => {
@@ -710,6 +1001,51 @@ function AppearancePage() {
         </div>
       </Card>
 
+      <Card title="自定义图片背景" icon="image"
+            desc="给面板、设置页与翻译页铺一张图片;悬浮窗的洞口区域始终透明,不受影响">
+        <div className="space-y-2">
+          <Field label="背景图片"
+                 hint="选择后立即应用到全部窗口(设置除外);支持 png / jpg / webp / bmp / gif">
+            <div className="flex gap-2 items-center">
+              <input className="ctl" value={ui.bgImage || ''} readOnly placeholder="未选择图片" />
+              <Btn primary onClick={async () => {
+                const uri = await call('pick_background_image')
+                if (!uri) return
+                setUi({ bgImage: uri })
+                toast('已应用背景图片')
+              }}>选择图片…</Btn>
+              <Btn danger disabled={!ui.bgImage} onClick={() => { setUi({ bgImage: '' }); toast('已移除背景图片') }}>移除</Btn>
+            </div>
+          </Field>
+          {ui.bgImage && (
+            <>
+              <Field label="显示方式">
+                <Segmented size="sm" value={ui.bgImageFit || 'cover'}
+                           options={BG_FITS.map((f) => ({ value: f.value, label: f.label }))}
+                           onChange={(v) => setUi({ bgImageFit: v })} />
+              </Field>
+              {/* 这里不再另做"预览块":下面的滑杆是直接应用到所有窗口的,
+                  改一项就能立刻在旁边(以及各模式窗口)看到真实效果。 */}
+              <Field label="不透明度" hint="调节后立即应用到所有窗口,所见即所得">
+                <SliderRow value={ui.bgImageOpacity ?? 100} min={10} max={100}
+                           onChange={(v) => setUi({ bgImageOpacity: v })} suffix="%" />
+              </Field>
+              <Field label="模糊" hint="模糊后更容易看清上面的文字">
+                <SliderRow value={ui.bgImageBlur ?? 0} min={0} max={30}
+                           onChange={(v) => setUi({ bgImageBlur: v })} suffix="px" />
+              </Field>
+              <Field label="压暗" hint="图片过亮时调高,提升文字对比度">
+                <SliderRow value={ui.bgImageDim ?? 0} min={0} max={80}
+                           onChange={(v) => setUi({ bgImageDim: v })} suffix="%" />
+              </Field>
+              <div className="hint px-1">
+                提示:当前效果已实时应用到设置页与各模式窗口;如需更明显的对比,可先把窗口切到悬浮窗或翻译模式再回来调。
+              </div>
+            </>
+          )}
+        </div>
+      </Card>
+
       <Card title="形态与细节" icon="sliders">
         <div className="space-y-2">
           <Field label="圆角大小">
@@ -760,31 +1096,153 @@ function AppearancePage() {
   )
 }
 
-/* ======================= 识别历史 ======================= */
+/* ======================= 识别历史(问题4:时间线) ======================= */
+/** 相对时间:今天 / 昨天 / N 天前,便于时间线快速定位 */
+function relTime(timeStr) {
+  if (!timeStr) return ''
+  const t = new Date(String(timeStr).replace(/-/g, '/')).getTime()
+  if (!t || Number.isNaN(t)) return timeStr
+  const diff = Date.now() - t
+  const day = 86400000
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
+  if (diff < day) return `${Math.floor(diff / 3600000)} 小时前`
+  const days = Math.floor(diff / day)
+  if (days === 1) return '昨天'
+  if (days < 30) return `${days} 天前`
+  return timeStr.slice(0, 10)
+}
+
+/** 结果来源的视觉编码:模型/知识库/翻译用不同颜色,便于一眼区分 */
+function sourceTone(src) {
+  const s = String(src || '')
+  if (s.includes('知识库')) return { color: 'var(--c-ok)', label: '知识库' }
+  if (s.includes('翻译')) return { color: 'var(--c-accent)', label: '翻译' }
+  if (s.includes('模型')) return { color: 'var(--c-warn)', label: '模型' }
+  return { color: 'var(--c-muted)', label: s || '—' }
+}
+
+const HISTORY_FILTERS = [
+  { value: 'all', label: '全部' },
+  { value: 'answer', label: '识别答题' },
+  { value: 'translate', label: '翻译' },
+  { value: 'knowledge', label: '本地知识库' },
+]
+
 function HistoryPage() {
   const app = useApp()
   const toast = useToast()
+  const [filter, setFilter] = useState('all')
+  const [expanded, setExpanded] = useState({})
+  // 分页渲染:历史最多 100 条,一次性铺满会在切换页面时明显卡顿
+  const [limit, setLimit] = useState(30)
   useEffect(() => { call('history_list').then(app.setHistory) }, [])
-  const list = app.history || []
+  const all = app.history || []
+
+  const list = useMemo(() => {
+    if (filter === 'all') return all
+    return all.filter((h) => {
+      const src = String(h.source || '')
+      const isTr = h.task === 'translate' || src.includes('翻译')
+      if (filter === 'translate') return isTr
+      if (filter === 'knowledge') return src.includes('知识库')
+      return !isTr && !src.includes('知识库')   // answer
+    })
+  }, [all, filter])
+
+  // 过滤条件变化时回到第一页,避免"切换筛选后还停在上次的分页深度"
+  useEffect(() => { setLimit(30) }, [filter])
+  const shown = useMemo(() => list.slice(0, limit), [list, limit])
+
+  // 关键数据:总条数 / 知识库命中率 / 平均总耗时
+  const stats = useMemo(() => {
+    const total = all.length
+    const kb = all.filter((h) => String(h.source || '').includes('知识库')).length
+    const durs = all.map((h) => (Number(h.ocr_time) || 0) + (Number(h.answer_time) || 0)).filter((d) => d > 0)
+    const avg = durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : 0
+    return { total, kb, avg, kbRate: total ? Math.round((kb * 100) / total) : 0 }
+  }, [all])
+
   return (
     <div className="space-y-3">
-      <Card title={`识别历史(${list.length})`} icon="history" right={<Btn danger onClick={async () => { await call('history_clear'); app.setHistory([]); toast('已清空') }}>清空全部</Btn>}>
-        {list.length === 0 && <div className="hint">暂无记录</div>}
-        <div className="space-y-2">
-          {list.map((h, i) => (
-            <div key={i} className="rounded-ctl border border-line p-2.5">
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className="chip">{h.qtype_name || '—'}</span>
-                <span className="chip">{h.source}</span>
-                <span className="hint">{h.time}</span>
-                <span className="flex-1" />
-                <Btn onClick={async () => { const ok = await call('copy_text', h.answer || ''); toast(ok ? '已复制' : '复制失败', ok ? 'ok' : 'danger') }}>复制</Btn>
-              </div>
-              <div className="text-[12px] text-muted line-clamp-2">{h.ocr_text}</div>
-              <div className="text-[13px] mt-1 whitespace-pre-wrap">{h.answer}</div>
+      <Card title={`识别历史(${all.length})`} icon="history"
+            right={<Btn danger onClick={async () => { await call('history_clear'); app.setHistory([]); toast('已清空') }}>清空全部</Btn>}>
+        {/* 关键数据用统计卡片突出(问题4) */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="inset px-3 py-2">
+            <div className="hint">总记录</div>
+            <div className="text-[20px] font-bold leading-tight tabular-nums">{stats.total}</div>
+          </div>
+          <div className="inset px-3 py-2">
+            <div className="hint">知识库命中</div>
+            <div className="text-[20px] font-bold leading-tight tabular-nums" style={{ color: 'var(--c-ok)' }}>
+              {stats.kbRate}<span className="text-[12px] font-normal text-muted">%</span>
             </div>
-          ))}
+          </div>
+          <div className="inset px-3 py-2">
+            <div className="hint">平均耗时</div>
+            <div className="text-[20px] font-bold leading-tight tabular-nums">
+              {stats.avg ? stats.avg.toFixed(1) : '—'}<span className="text-[12px] font-normal text-muted">s</span>
+            </div>
+          </div>
         </div>
+
+        <div className="flex items-center gap-2 mb-3">
+          <Segmented size="sm" value={filter} options={HISTORY_FILTERS} onChange={setFilter} />
+          <span className="flex-1" />
+          <span className="hint">共 {list.length} 条</span>
+        </div>
+
+        {list.length === 0 && <div className="hint py-3 text-center">暂无记录</div>}
+        {/* 时间线:左侧竖轴 + 节点,右侧内容卡片 */}
+        <div className="history-timeline">
+          {shown.map((h, i) => {
+            const tone = sourceTone(h.source)
+            const isTr = h.task === 'translate' || String(h.source || '').includes('翻译')
+            const open = !!expanded[i]
+            const total = (Number(h.ocr_time) || 0) + (Number(h.answer_time) || 0)
+            return (
+              <div key={i} className="history-item anim-stagger" style={{ '--i': i }}>
+                <span className="history-dot" style={{ background: tone.color }} />
+                <div className="history-card">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="history-time" title={h.time}>{relTime(h.time)}</span>
+                    <span className="stat-chip" style={{ color: tone.color, borderColor: tone.color }}>{tone.label}</span>
+                    {isTr && <span className="stat-chip">翻译</span>}
+                    <span className="flex-1" />
+                    {total > 0 && <span className="stat-chip">耗时 <b>{total.toFixed(1)}s</b></span>}
+                    <button
+                      type="button" className="icon-btn !w-6 !h-6"
+                      title={open ? '收起' : '展开全文'}
+                      onClick={() => setExpanded((m) => ({ ...m, [i]: !open }))}
+                    >
+                      <Icon name="chevronDown" size={13}
+                            className="transition-transform"
+                            style={{ transform: open ? 'rotate(180deg)' : 'none' }} />
+                    </button>
+                  </div>
+                  <div className={`history-src text-[12px] text-muted ${open ? '' : 'clamp-2'}`}>{h.ocr_text}</div>
+                  <div className={`history-answer text-[13px] ${open ? '' : 'clamp-3'}`}>{h.answer}</div>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className="hint">{h.time}</span>
+                    <span className="flex-1" />
+                    <Btn className="!h-6 !text-[11.5px]" icon="copy" onClick={async () => {
+                      const ok = await call('copy_text', h.answer || '')
+                      toast(ok ? '已复制' : '复制失败', ok ? 'ok' : 'danger')
+                    }}>复制回答</Btn>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        {list.length > limit && (
+          <div className="flex justify-center pt-2">
+            <Btn className="!h-7 !text-[12px]" onClick={() => setLimit((n) => n + 30)}>
+              加载更多(还有 {list.length - limit} 条)
+            </Btn>
+          </div>
+        )}
       </Card>
     </div>
   )

@@ -2,6 +2,7 @@
 """请求记录:最近请求的成功/失败与耗时,供「关于应用」的 GitHub 风格绿块图展示。"""
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -11,6 +12,7 @@ else:
     ROOT = Path(__file__).resolve().parent.parent
 LOG_PATH = ROOT / "request_log.json"
 MAX_RECORDS = 500
+_lock = threading.Lock()          # 多个工作线程会并发写日志,加锁避免互相覆盖
 
 
 def load() -> list:
@@ -21,9 +23,11 @@ def load() -> list:
 
 
 def append(ok: bool, ms: float, source: str = "模型") -> None:
-    records = load()
-    records.append({"ts": time.time(), "ok": ok, "ms": int(ms), "source": source})
-    save(records[-MAX_RECORDS:])
+    """追加一条记录(线程安全)。写入失败不影响主流程。"""
+    with _lock:
+        records = load()
+        records.append({"ts": time.time(), "ok": ok, "ms": int(ms), "source": source})
+        save(records[-MAX_RECORDS:])
 
 
 def save(records: list) -> None:
@@ -31,17 +35,22 @@ def save(records: list) -> None:
 
 
 def day_counts(days: int = 140) -> dict:
-    """返回最近 days 天内每天请求次数:{'YYYY-MM-DD': count}。"""
+    """返回最近 days 天内每天请求次数:{'YYYY-MM-DD': count}(更早的记录不计入)。"""
+    cutoff = time.time() - max(1, int(days)) * 86400
     counts = {}
     for r in load():
-        d = time.strftime("%Y-%m-%d", time.localtime(r["ts"]))
+        ts = float(r.get("ts") or 0)
+        if ts < cutoff:
+            continue
+        d = time.strftime("%Y-%m-%d", time.localtime(ts))
         counts[d] = counts.get(d, 0) + 1
     return counts
 
 
 def stats(days: int = 140) -> dict:
     """统计:总请求次数、失败次数、成功率、平均耗时,以及最近 days 天的天数覆盖。"""
-    records = load()
+    cutoff = time.time() - max(1, int(days)) * 86400
+    records = [r for r in load() if float(r.get("ts") or 0) >= cutoff]
     total = len(records)
     failed = sum(1 for r in records if not r.get("ok", True))
     ok = total - failed

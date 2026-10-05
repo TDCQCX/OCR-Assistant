@@ -75,6 +75,7 @@ class Api:
             "key_ready": bool((prov.get("api_key") or "").strip()),
             "history": history.load(),
             "mode": cfg.get("mode", "overlay"),
+            "modal_block": bool(getattr(self.app, "_modal_block", False)),
         }
 
     def save_ui(self, patch: dict) -> bool:
@@ -88,6 +89,9 @@ class Api:
         cfg = self.app.cfg
         _set_path(cfg, path, value)
         cfgmod.save_config(cfg)
+        # 快捷键改完要重新注册,否则旧键继续生效、新键不生效
+        if str(path).startswith("hotkeys."):
+            self.app.reload_hotkeys()
         # 从端侧切回云端时,把常驻的端侧模型释放掉(否则一直占着几百 MB~2.4GB)
         if str(path) == "translate.mode" and str(value) != "local":
             self._release_local_models("已切回云端翻译,已释放端侧模型")
@@ -105,7 +109,7 @@ class Api:
         except Exception:
             freed = 0
         if freed and note:
-            self.app.push({"type": "status", "text": note, "tone": "ok"})
+            self.app.push({"type": "notice", "text": note, "tone": "ok"})
         return freed
 
     def loaded_local_models(self) -> dict:
@@ -190,6 +194,10 @@ class Api:
     def set_mini_height(self, h) -> bool:
         """前端上报迷你条内容自然高度,由后端锁定窗口高度。"""
         return self.app.set_mini_height(h)
+
+    def resize_mini_width(self, w) -> bool:
+        """前端上报迷你条所需的自然宽度(保证右上角控件不被挤出)。"""
+        return self.app.resize_mini_width(w)
 
     # ================= 新手教程 =================
     def guide_begin(self, mode: str) -> bool:
@@ -282,7 +290,7 @@ class Api:
         cfgmod.save_config(cfg)
         if cfg.get("active_provider") != before:
             picked = next((p for p in provs if p.get("id") == cfg.get("active_provider")), {})
-            self.app.push({"type": "status",
+            self.app.push({"type": "notice",
                            "text": f"已自动切换使用平台:{picked.get('name', cfg.get('active_provider'))}",
                            "tone": "ok"})
             self.app.push({"type": "config", "config": cfg})
@@ -323,7 +331,7 @@ class Api:
         cfg["active_provider"] = pid
         cfgmod.save_config(cfg)
         missing_model = not (prov.get("model") or "").strip()
-        self.app.push({"type": "status",
+        self.app.push({"type": "notice",
                        "text": f"已切换使用平台:{prov.get('name', pid)}"
                                + ("(该平台还没填模型 ID)" if missing_model else ""),
                        "tone": "warn" if missing_model else "ok"})
@@ -367,6 +375,28 @@ class Api:
         threading.Thread(target=self._test_connection, args=(int(i),), daemon=True).start()
         return {"started": True}
 
+    def fetch_provider_models(self, i: int) -> dict:
+        """按该平台的 Base URL 拉取模型列表(后台线程,结果用 models 事件推送)。"""
+        threading.Thread(target=self._fetch_models, args=(int(i),), daemon=True).start()
+        return {"started": True}
+
+    def _fetch_models(self, i: int):
+        cfg = self.app.cfg
+        provs = cfg.get("providers", [])
+        if not (0 <= i < len(provs)):
+            self.app.push({"type": "models", "i": i, "ok": False, "list": [], "message": "平台不存在"})
+            return
+        p = provs[i]
+        self.app.push({"type": "models", "i": i, "pending": True, "list": []})
+        client = AgentClient(p.get("api_key", ""), p.get("model", ""), p.get("base_url", ""),
+                             timeout=min(int(cfg.get("timeout", 180)), 20))
+        try:
+            models, err = client.list_models()
+        except Exception as exc:  # noqa: BLE001
+            models, err = [], str(exc)
+        self.app.push({"type": "models", "i": i, "ok": bool(models),
+                       "list": models, "message": err or f"已获取 {len(models)} 个模型"})
+
     def _test_connection(self, i: int):
         cfg = self.app.cfg
         provs = cfg.get("providers", [])
@@ -396,6 +426,21 @@ class Api:
             return True
         except Exception:
             return False
+
+    def pick_background_image(self):
+        """选择自定义背景图片,返回可直接给 CSS 用的 file:/// URI(取消则 None)。"""
+        try:
+            win = self.app.settings or self.app.overlay
+            res = win.create_file_dialog(
+                _dialog('OPEN'), allow_multiple=False,
+                file_types=("图片 (*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif)", "所有文件 (*.*)"),
+            )
+            if not res:
+                return None
+            path = res if isinstance(res, str) else res[0]
+            return Path(path).resolve().as_uri()
+        except Exception:
+            return None
 
     def import_theme(self):
         try:
@@ -446,11 +491,6 @@ class Api:
         threading.Thread(target=self.app.run_translate, args=(question or "",), daemon=True).start()
         return True
 
-    def run_mini_capture(self, question: str = "") -> bool:
-        """迷你条快速识别:复用上次框选区域,没有则进入框选。"""
-        threading.Thread(target=self.app.run_capture_last, args=(question or "",), daemon=True).start()
-        return True
-
     def snip_translate(self):
         self.app.start_snip_translate()
 
@@ -488,6 +528,9 @@ class Api:
         st = local_models.summary()
         st["mt"] = local_models.mt_status(cfg_tr.get("source_lang", "自动检测"),
                                           cfg_tr.get("target_lang", "中文"))
+        # 当前档位是否就绪(与语言对无关):前端据此决定"能否直接切到端侧",避免反复弹下载框
+        st["mt_tier_ready"] = local_models.mt_current_ready()
+        st["mt_tier"] = local_models.get_mt_tier()
         cur_ocr = local_models.get_ocr_tier()
         st["ocr"] = local_models.ocr_tier_status(cur_ocr)
         st["tiers"] = {
@@ -566,7 +609,7 @@ class Api:
                 msg = "未知的模型类型"
             self.app.push({"type": "download", "kind": kind, "tier": tier, "pct": 100,
                            "done": True, "message": msg})
-            self.app.push({"type": "status", "text": msg, "tone": "ok"})
+            self.app.push({"type": "notice", "text": msg, "tone": "ok"})
         except Exception as exc:  # noqa: BLE001
             self.app.push({"type": "download", "kind": kind, "tier": tier, "pct": 0, "done": True,
                            "error": str(exc)})
@@ -608,7 +651,14 @@ class Api:
         self.app.start_snip()
 
     def finish_snip(self, sel: dict, action: str = "run", question: str = ""):
-        self.app.finish_snip(sel or {}, action, question or "")
+        """框选完成。兼容两种前端签名:
+
+        - 新版:``finish_snip({x,y,w,h,dpr}, action, question)``
+        - 旧版:``finish_snip({...,, action}, question)``
+        """
+        from app.manager import normalize_snip_args
+        sel, action, question = normalize_snip_args(sel, action, question)
+        self.app.finish_snip(sel, action, question)
 
     def cancel_snip(self):
         self.app.cancel_snip()
@@ -625,6 +675,10 @@ class Api:
             return True
         except Exception:
             return False
+
+    def toggle_topmost(self) -> bool:
+        """切换(而非设置)窗口置顶,返回切换后的值。"""
+        return self.app.toggle_topmost()
 
     def set_topmost(self, on: bool) -> bool:
         try:
@@ -654,6 +708,30 @@ class Api:
 
     def close_settings(self):
         self.app.close_settings()
+
+    def quit_pending(self) -> str:
+        """待处理的退出确认目标模式(空串=无),供前端窗口切换后主动回拉。"""
+        return self.app.quit_pending()
+
+    def clear_quit_pending(self) -> bool:
+        """用户已处理退出确认。"""
+        return self.app.clear_quit_pending()
+
+    def clear_quit_pending_for(self, mode: str) -> bool:
+        """只清除指定模式的未决标记。"""
+        return self.app.clear_quit_pending_for(mode)
+
+    def open_quit_dialog_in_main(self) -> bool:
+        """从迷你条退出提示跳到悬浮窗并弹出退出确认。"""
+        return self.app.open_quit_dialog_in_main()
+
+    def set_modal_room(self, on: bool = True, extra: int = 0) -> bool:
+        """迷你条模式弹窗/提示期间,在它"上方"预留 extra 像素空间(关闭即还原)。"""
+        return self.app.set_modal_room(bool(on), extra or 0)
+
+    def set_modal_block(self, on: bool = True) -> bool:
+        """设置窗口打开/关闭时切换主界面的"禁用交互"状态(问题7)。"""
+        return self.app.set_modal_block(bool(on))
 
     def quit_app(self):
         self.app.quit_app()

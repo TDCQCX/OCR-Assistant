@@ -13,28 +13,56 @@ export default function QuitDialog({ mode }) {
   const [open, setOpen] = useState(false)
   const [remember, setRemember] = useState(false)
 
-  // 只有"当前显示的模式窗口"弹窗,避免多个窗口同时冒出对话框
+  // 只在"当前显示的、放得下弹窗的模式窗口"里渲染。
+  // 判定**不看 cfg.mode** —— 配置广播到各窗口有延迟,窗口刚显示或刚切换模式时
+  // cfg.mode 还可能是旧值,那样 confirmQuit 会被误判过滤掉,表现为"退出按钮没反应"。
+  // 后端在事件里显式带上目标模式(mode 字段),这里按它判断即可。
   useEffect(() => {
+    const wanted = (m) => m && m !== 'mini' && m === mode
     const onEvent = (e) => {
-      if (e?.detail?.type !== 'confirmQuit') return
-      if ((app.cfg?.mode || 'overlay') !== mode) return
-      setOpen(true)
+      const ev = e?.detail
+      if (!ev) return
+      if (ev.type === 'confirmQuit') {
+        if (wanted(ev.mode || (app.cfg?.mode || 'overlay'))) setOpen(true)
+        return
+      }
     }
     window.addEventListener('ocr-event', onEvent)
-    return () => window.removeEventListener('ocr-event', onEvent)
-  }, [app.cfg?.mode, mode])
 
+    // 双保险:事件可能在"窗口刚显示、监听还没装好"的瞬间发出,这里主动回拉一次。
+    let alive = true
+    const pull = () => {
+      call('quit_pending').then((target) => {
+        if (!alive) return
+        if (wanted(target)) setOpen(true)
+      }).catch(() => {})
+    }
+    const t0 = setTimeout(pull, 300)
+    const t1 = setTimeout(pull, 1200)
+    const t2 = setTimeout(pull, 2400)
+    return () => {
+      alive = false
+      clearTimeout(t0); clearTimeout(t1); clearTimeout(t2)
+      window.removeEventListener('ocr-event', onEvent)
+    }
+  }, [mode])
+
+  const cancel = () => {
+    setOpen(false)
+    call('clear_quit_pending_for', mode)   // 只清本模式,避免影响其它窗口
+  }
   useEffect(() => {
     if (!open) return undefined
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') cancel() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
-  // 弹窗期间临时取消洞口穿透:否则压在"被挖掉的洞口区域"上的部分既看不见也点不到
+  // 弹窗期间:取消洞口穿透(否则被裁掉)+ 迷你条临时加高(100px 高放不下这个弹窗)
   useEffect(() => {
     call('pause_hole', open)
-    return () => { call('pause_hole', false) }
+    call('set_modal_room', open)
+    return () => { call('pause_hole', false); call('set_modal_room', false) }
   }, [open])
 
   if (!open) return null
@@ -42,12 +70,13 @@ export default function QuitDialog({ mode }) {
   const choose = async (action) => {
     if (remember) await call('set_quit_action', action)
     setOpen(false)
+    call('clear_quit_pending_for', mode)
     if (action === 'tray') await call('minimize_app')
     else if (action === 'exit') await call('quit_app')
   }
 
   return (
-    <div className="modal-mask" style={{ zIndex: 9600 }} onClick={() => setOpen(false)}>
+    <div className="modal-mask" style={{ zIndex: 9600 }} onClick={cancel}>
       <div className="modal-card space-y-3" style={{ width: 'min(392px, calc(100vw - 24px))' }}
            onClick={(e) => e.stopPropagation()} data-quit-dialog="1">
         <div className="flex items-center gap-2.5">
@@ -90,7 +119,7 @@ export default function QuitDialog({ mode }) {
 
         <div className="flex items-center gap-2">
           <span className="hint flex-1">Esc 或点击空白处 = 取消</span>
-          <Btn onClick={() => setOpen(false)}>再想想</Btn>
+          <Btn onClick={cancel}>再想想</Btn>
         </div>
       </div>
     </div>

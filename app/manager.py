@@ -19,8 +19,43 @@ from app import history, request_log
 from app.agent import AgentClient
 from app.capturer import CaptureError, grab_region, virtual_screen
 from app.mainthread import run_in_main
+from app.winutil import apply_hole_region, clear_region, physical_origin, screen_scale
 
 WEBUI = Path(__file__).resolve().parent / "webui"
+
+# 迷你条最小宽度(逻辑像素):实测第一行"右侧全部控件 + 左侧状态点"自然宽度约 565,
+# 这里留字号放大的余量。低于该值右上角图标会被挤出窗口而"消失",所以统一在此约束。
+MINI_MIN_WIDTH = 640
+
+# 迷你条"上方"为提示浮层预留的高度(逻辑像素);窗口向上扩展这么多。
+# 提示卡已改为"短标题 + 一排按钮"的紧凑单行,实测约 40px,这里留一点字号余量即可 ——
+# 之前取 150 会在卡片上方留下一大块空白。
+MINI_MODAL_EXTRA = 58
+
+SNIP_ACTIONS = ("run", "translate", "region")
+
+
+def normalize_snip_args(sel: dict, action: str = "run", question: str = ""):
+    """归一化框选回调参数,返回 (sel, action, question)。
+
+    前端历史上存在两种调用方式,必须都认:
+      * 新版:``finish_snip({x,y,w,h,dpr}, "region", "提问")``
+      * 旧版:``finish_snip({...,, "action": "region"}, "提问")``
+
+    旧版把动作塞进 sel、把提问当作第二个参数,而后端签名是 (sel, action, question),
+    于是 action 收到整句提问、question 变成空 —— 结果「翻译此区域 / 设为悬浮窗区域」
+    全部退化成默认识别。这里统一收敛,避免动作丢失。
+    """
+    sel = dict(sel or {})
+    inner_action = str(sel.pop("action", "") or "").strip()
+    if inner_action:
+        if not question and action and action != inner_action:
+            question = str(action)
+        action = inner_action
+    action = str(action or "run").strip() or "run"
+    if action not in SNIP_ACTIONS:
+        action = "run"
+    return sel, action, str(question or "")
 
 
 def _url(view: str) -> str:
@@ -53,10 +88,17 @@ class App:
         self._guide_mode = ""
         self._guide_mini_backup = 0
         self._guide_pending = ""
+        self._mini_modal_backup = None  # 弹窗期间迷你条的原始 x/y/w/h(关闭后精确还原)
+        self._mini_modal_open = False
+        self._mini_modal_extra = MINI_MODAL_EXTRA
+        self._quit_pending = ""      # 待处理的退出确认目标模式(空串=无),供前端回拉
         self._hole_paused = False
+        self._hole_active = False
+        self._hotkeys = ()
         self._tray = None
         self._tray_menu = None
         self._in_tray = False
+        self._modal_block = False      # 设置窗口打开期间禁用主界面交互
         # 前端事件统一由独立线程推送:evaluate_js 会阻塞等待 JS 结果,
         # 若在 Qt 主线程调用会死锁(界面无响应),因此必须走非 GUI 线程。
         self._push_q = queue.Queue(maxsize=128)
@@ -140,8 +182,12 @@ class App:
         return True               # 直接退出:放行 → closed 回调里收尾
 
     def _on_window_closed(self, which: str):
-        """窗口已关闭:当前模式的窗口被关掉就等于退出程序。"""
-        if which in ("overlay", "mini", "translate"):
+        """窗口已关闭:只有「当前模式」的窗口被关掉才等于退出程序。
+
+        隐藏着的其它模式窗口被系统/窗口管理器关掉时不应连带退出进程,
+        否则会出现"关掉一个没显示的备用小窗,整个程序就没了"。
+        """
+        if which in ("overlay", "mini", "translate") and (self.cfg.get("mode") or "overlay") == which:
             self.quit_app()
 
     def pause_hole(self, on: bool = True) -> bool:
@@ -165,16 +211,8 @@ class App:
             return
 
         def do():
-            try:
-                import ctypes
-                from ctypes import wintypes
-                user32 = ctypes.windll.user32
-                user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HANDLE, wintypes.BOOL]
-                user32.SetWindowRgn.restype = ctypes.c_int
-                user32.SetWindowRgn(wintypes.HWND(int(win.native.winId())), None, True)
-                self._hole_active = False
-            except Exception:
-                pass
+            clear_region(win)
+            self._hole_active = False
 
         run_in_main(do)
 
@@ -223,15 +261,21 @@ class App:
             hidden=mode != "mini",
             # pywebview 默认 min_size=(200,100) 会把迷你条顶到 100px,导致高度「还原不了」;
             # 这里显式放宽下限,高度由前端实测的自然高度锁定(见 set_mini_height)。
-            min_size=(320, 56),
+            # 宽度也要有下限:迷你条第一行左侧是状态文字、右侧是一组图标按钮,
+            # 窗口被继续压缩时右侧按钮会被挤出可视区"消失"。实测第一行控件自然宽度
+            # 之和约 565px(字号 13),这里取 640px 作为下限,并在
+            # resize_move / resize_end 里同步限制(左侧状态文字可 truncate 到 0)。
+            min_size=(MINI_MIN_WIDTH, 56),
         )
         tx, ty = cfg["window"].get("translate_x"), cfg["window"].get("translate_y")
         # 翻译窗口不透明(避免遮挡/看不清内容),默认不置顶
+        # 翻译窗口也用透明窗口:根容器是圆角外壳,窗口本身又必须是不透明观感,
+        # 于是"外壳画底 + 窗口透明"才能得到干净的圆角(否则圆角外是方形底)。
         self.translate = webview.create_window(
             "OCR 助手 - 翻译", _url("translate"), js_api=api, width=tw, height=th,
             frameless=True, easy_drag=False,
             on_top=bool(cfg["window"].get("translate_on_top", False)),
-            transparent=False, hidden=mode != "translate", text_select=True,
+            transparent=True, hidden=mode != "translate", text_select=True,
             **({"x": int(tx), "y": int(ty)} if tx is not None and ty is not None else {}),
         )
         # 设置窗口与框选窗口「按需创建」:每个 WebEngine 窗口都要占一个渲染进程
@@ -250,16 +294,7 @@ class App:
 
     def _screen_scale(self) -> float:
         """当前屏幕缩放比(200% 缩放 → 2.0)。"""
-        try:
-            from PySide6.QtGui import QGuiApplication
-            s = QGuiApplication.primaryScreen()
-            if s is not None:
-                dpr = float(s.devicePixelRatio() or 1.0)
-                if dpr > 0:
-                    return dpr
-        except Exception:
-            pass
-        return 1.0
+        return screen_scale()
 
     def _snip_geometry(self) -> dict:
         """框选窗口几何:virtual_screen 给的是物理像素,而 Qt 窗口用逻辑像素。
@@ -301,6 +336,7 @@ class App:
     def _on_settings_closed(self):
         # 用户关掉设置窗口后释放引用,下次打开设置时重新按需创建
         self.settings = None
+        self.set_modal_block(False)      # 主界面恢复可操作
         self.cfg = cfgmod.load_config()
         self.push({"type": "config", "config": self.cfg})
 
@@ -378,6 +414,10 @@ class App:
                 time.sleep(1.6)
                 self.push({"type": "result", "data": self._last_result})
             threading.Thread(target=replay, daemon=True).start()
+        if prev == "mini" and mode != "mini" and self._mini_modal_open:
+            # 迷你条的退出提示还开着就切走了:后端兜底还原(隐藏窗口里的 JS 可能已挂起)
+            self.set_modal_room(False)
+            self.push({"type": "quitHint", "where": "mini", "value": False})
         if mode != "translate":
             self._stop_auto_refresh()
         # 翻译模式:窗口消失前先记录位置
@@ -403,7 +443,7 @@ class App:
         win_cfg = self.cfg.get("window") or {}
         if mode == "mini":
             win = self.mini
-            w = max(320, int(win_cfg.get("miniWidth", 420)))
+            w = max(MINI_MIN_WIDTH, int(win_cfg.get("miniWidth", MINI_MIN_WIDTH)))
             # 高度用前端实测并锁定的 miniHeight(随字号/主题自适应),没有则退回默认值
             h = max(56, int(win_cfg.get("miniHeight") or win_cfg.get("defaultMiniHeight", 78)))
         elif mode == "translate":
@@ -443,6 +483,31 @@ class App:
         self.push({"type": "config", "config": self.cfg})
         return dict(win_cfg)
 
+    def resize_mini_width(self, w) -> bool:
+        """把迷你条加宽到足以容纳「左侧状态 + 右侧全部控件」(问题9)。
+
+        只增不减:前端实测出的自然宽度是"不丢控件"的下限,用户手动拉宽后不会被压回去。
+        """
+        try:
+            want = int(round(float(w)))
+        except Exception:
+            return False
+        want = max(MINI_MIN_WIDTH, min(1400, want))
+        win_cfg = self.cfg.setdefault("window", {})
+        cur = max(MINI_MIN_WIDTH, int(win_cfg.get("miniWidth") or MINI_MIN_WIDTH))
+        if want <= cur:
+            return True
+        win_cfg["miniWidth"] = want
+        cfgmod.save_config(self.cfg)
+        if self.mini is None:
+            return True
+        try:
+            run_in_main(lambda: self.mini.resize(want, int(self.mini.height)))
+        except Exception:
+            pass  # 窗口 resize 失败不回滚已保存的宽度:前端下次上报会重新校正
+        self.push({"type": "config", "config": self.cfg})
+        return True
+
     def set_mini_height(self, h) -> bool:
         """锁定迷你条高度为前端实测的自然高度(字号/主题/内容变化时由前端上报)。
 
@@ -454,8 +519,10 @@ class App:
         except Exception:
             return False
         want = max(56, min(240, want))
-        # 教程进行中迷你条被临时加高,此时忽略前端上报,避免气泡被立刻挤掉
+        # 教程/弹窗期间迷你条被临时加高,此时忽略前端上报,避免被立刻压回去
         if self._guide_mode == "mini" and int(self.mini.height if self.mini else 0) > want:
+            return True
+        if self._mini_modal_open and int(self.mini.height if self.mini else 0) > want:
             return True
         win_cfg = self.cfg.setdefault("window", {})
         if int(win_cfg.get("miniHeight") or 0) != want:
@@ -567,11 +634,20 @@ class App:
             w, h = int(rect.get("w", 0)), int(rect.get("h", 0))
         except Exception:
             return False
-        # 同时记录窗口「非洞口」部分的高度(标题栏+底部面板),供"设为悬浮窗区域"换算窗口尺寸
+        # 记录窗口「非洞口」部分的高度(标题栏+底部面板),供"设为悬浮窗区域"换算窗口尺寸。
+        # 注意单位:holeWidth/holeHeight 存物理像素(前端除以 devicePixelRatio 还原),
+        # 而 chromeHeight 存 **CSS 像素** —— 它要被直接加到 CSS 高度的洞口尺寸上
+        # (resize_main(w, h + chromeHeight)),若按物理像素存会高出 (缩放比-1) 倍。
         try:
-            inner_h = int(rect.get("innerH") or 0)
-            if inner_h > h > 0:
-                self.cfg.setdefault("window", {})["chromeHeight"] = inner_h - h
+            chrome_css = int(rect.get("chromeCss") or 0)
+            if chrome_css <= 0:
+                inner_h = int(rect.get("innerH") or 0)
+                if inner_h > h > 0:
+                    k = screen_scale() or 1.0
+                    chrome_css = int(round((inner_h - h) / k))
+            if chrome_css > 0:
+                self.cfg.setdefault("window", {})["chromeHeight"] = chrome_css
+            if w > 0 and h > 0:
                 self.cfg["window"]["holeWidth"] = w
                 self.cfg["window"]["holeHeight"] = h
         except Exception:
@@ -608,7 +684,9 @@ class App:
         dx = float(sx) - d["px"]
         dy = float(sy) - d["py"]
         edge = d["edge"]
-        minw, minh = (360, 260) if which == "overlay" else (360, 78)
+        # 迷你条:宽度下限 640(容纳左侧状态文字 + 右侧一整组图标按钮),
+        # 高度固定不响应上下拉伸;悬浮窗:360x260
+        minw, minh = (360, 260) if which == "overlay" else (MINI_MIN_WIDTH, 56)
         x, y, w, h = d["x"], d["y"], d["w"], d["h"]
         if "e" in edge:
             w = max(minw, w + dx)
@@ -645,101 +723,39 @@ class App:
             elif which == "mini":
                 # 注意:迷你条必须写回 mini_* 键,否则会污染悬浮窗尺寸(此前表现为迷你条高度乱变且无法还原)
                 win_cfg["mini_x"], win_cfg["mini_y"] = pos[0], pos[1]
-                win_cfg["miniWidth"] = pos[2]
-                win_cfg["miniHeight"] = int(win_cfg.get("defaultMiniHeight", 78))
+                win_cfg["miniWidth"] = max(MINI_MIN_WIDTH, int(pos[2]))
+                win_cfg["miniHeight"] = int(win_cfg.get("miniHeight") or win_cfg.get("defaultMiniHeight", 94))
             else:
                 win_cfg["x"], win_cfg["y"] = pos[0], pos[1]
                 win_cfg["width"], win_cfg["height"] = pos[2], pos[3]
-                win_cfg["holeWidth"] = max(120, pos[2] - 4)
-                win_cfg["holeHeight"] = max(80, pos[3] - int(win_cfg.get("chromeHeight") or 300))
+                # holeWidth/holeHeight 一律按「物理像素」存储(与 set_hole_region 一致,
+                # 前端换算回 CSS 像素时除以 devicePixelRatio),这里要把逻辑像素乘上缩放比;
+                # chromeHeight 是 CSS 像素,先与 CSS 高度相减再整体换算。
+                k = screen_scale()
+                chrome_css = float(win_cfg.get("chromeHeight") or 300)
+                win_cfg["holeWidth"] = max(120, int(round((pos[2] - 4) * k)))
+                win_cfg["holeHeight"] = max(80, int(round((pos[3] - chrome_css) * k)))
             # 缩到最小 → 迷你条;迷你条拉伸过大 → 悬浮窗
-            min_w, min_h = (420, 300) if which == "overlay" else (0, 0)
-            max_w = 560
-            if which == "overlay" and (pos[2] < min_w or pos[3] < min_h):
-                switch_to = "mini"
-            elif which == "mini" and pos[2] > max_w:
+            max_w = 820
+            if which == "mini" and pos[2] > max_w:
                 switch_to = "overlay"
             cfgmod.save_config(self.cfg)
         except Exception:
             pass
         self.push({"type": "config", "config": self.cfg})
         if switch_to:
-            self.push({"type": "status", "text": "已切换到" + ("迷你条模式" if switch_to == "mini" else "悬浮窗模式"),
-                       "tone": "ok"})
+            # 用 notice(轻提示)而不是 status:status 专用于 AI 运行状态,
+            # 写"已切换到悬浮窗模式"这类界面文案会一直挂在状态灯旁边不消失。
+            self.push({"type": "notice", "text": "已切换到悬浮窗模式", "tone": "ok"})
             self.set_mode(switch_to)
         return True
 
     def _apply_region(self, hx: int, hy: int, hw: int, hh: int):
+        """把洞口从窗口区域中挖掉(物理像素);实现见 app/winutil.py。"""
         win = self.overlay
-        try:
-            hwnd = int(win.native.winId())
-        except Exception:
+        if win is None:
             return
-        if not hwnd:
-            return
-        try:
-            import ctypes
-            from ctypes import wintypes
-            user32 = ctypes.windll.user32
-            gdi32 = ctypes.windll.gdi32
-            # 必须声明原型:64 位下句柄若按 int 传参会截断,导致区域创建失败
-            gdi32.CreateRectRgn.argtypes = [ctypes.c_int] * 4
-            gdi32.CreateRectRgn.restype = wintypes.HANDLE
-            gdi32.SetRectRgn.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_int,
-                                         ctypes.c_int, ctypes.c_int]
-            gdi32.SetRectRgn.restype = ctypes.c_int
-            gdi32.CombineRgn.argtypes = [wintypes.HANDLE, wintypes.HANDLE, wintypes.HANDLE, ctypes.c_int]
-            gdi32.CombineRgn.restype = ctypes.c_int
-            gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
-            gdi32.DeleteObject.restype = wintypes.BOOL
-            user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-            user32.GetClientRect.restype = wintypes.BOOL
-            user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HANDLE, wintypes.BOOL]
-            user32.SetWindowRgn.restype = ctypes.c_int
-            user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
-                                            ctypes.c_int, ctypes.c_int, ctypes.c_uint]
-
-            r = wintypes.RECT()
-            if not user32.GetClientRect(hwnd, ctypes.byref(r)):
-                return
-            cw, ch = int(r.right - r.left), int(r.bottom - r.top)
-            if cw < 8 or ch < 8:
-                return
-            left, top = max(0, hx), max(0, hy)
-            right, bottom = min(cw, hx + hw), min(ch, hy + hh)
-            if right - left < 4 or bottom - top < 4:
-                parts = [(0, 0, cw, ch)]
-            else:
-                parts = [
-                    (0, 0, cw, top),                       # 洞口上方
-                    (0, bottom, cw, ch - bottom),          # 洞口下方
-                    (0, top, left, bottom - top),          # 洞口左侧
-                    (right, top, cw - right, bottom - top),  # 洞口右侧
-                ]
-            parts = [p for p in parts if p[2] > 0 and p[3] > 0]
-            if not parts:
-                return
-
-            rgn = gdi32.CreateRectRgn(0, 0, 0, 0)
-            if not rgn:
-                return
-            px, py, pw, ph = parts[0]
-            gdi32.SetRectRgn(rgn, px, py, px + pw, py + ph)
-            if len(parts) > 1:
-                tmp = gdi32.CreateRectRgn(0, 0, 0, 0)
-                for px, py, pw, ph in parts[1:]:
-                    gdi32.SetRectRgn(tmp, px, py, px + pw, py + ph)
-                    gdi32.CombineRgn(rgn, rgn, tmp, 2)  # RGN_OR
-                gdi32.DeleteObject(tmp)
-
-            if not user32.SetWindowRgn(hwnd, rgn, True):
-                gdi32.DeleteObject(rgn)  # 失败时区域所有权仍在本地
-                return
-            # 让系统按新区域重算窗口框并重绘
-            user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0020 | 0x0002 | 0x0001 | 0x0004)
-            self._hole_active = True
-        except Exception:
-            pass
+        self._hole_active = apply_hole_region(win, hx, hy, hw, hh)
 
     # ================= 新手教程辅助 =================
     def guide_begin(self, mode: str) -> bool:
@@ -769,10 +785,8 @@ class App:
         if self._guide_pending == mode:
             self._guide_pending = ""
         if mode == "mini" and self.mini is not None:
-            # 教程进行中迷你条被临时加高,不要在这里压回去,否则气泡会被挤掉
-            if self._guide_mode == "mini":
-                return
-            h = int(self.cfg["window"].get("miniHeight") or 94)
+            # 教程结束:把临时加高的迷你条压回内容自然高度
+            h = max(56, int(self.cfg["window"].get("miniHeight") or 94))
             self._guide_mini_backup = 0
             run_in_main(lambda: self.mini.resize(int(self.mini.width), h))
         elif mode == "overlay" and self._hole_key:
@@ -837,6 +851,78 @@ class App:
         return mode
 
     # ================= 设置窗口 =================
+    def reload_hotkeys(self) -> bool:
+        """快捷键配置变化后重新注册(设置页保存时调用)。"""
+        self._register_hotkeys()
+        return True
+
+    def set_modal_room(self, on: bool, extra: int = 0) -> bool:
+        """给迷你条"上方"腾出一块空间来放提示浮层。
+
+        关键点是**向上扩展**:先记住原始 (x, y, w, h),再把窗口上移同样高度并加高,
+        前端把迷你条内容贴底 —— 这样迷你条本体在屏幕上位置不变,多出来的空间出现在它上方。
+        关闭时按记住的 (x, y, w, h) 原样还原,不会出现"被撑开且回不去"。
+        """
+        if self.mini is None:
+            return True
+        # 还原(lifting the room)必须无条件执行:提示打开期间用户可能已经切到别的模式,
+        # 若这里跟着"当前模式"提前 return,迷你条就会被永久撑大。
+        if not on:
+            if not self._mini_modal_open and self._mini_modal_backup is None:
+                return True        # 本来就没打开:忽略,避免乱序的 加高/还原 互相打架
+            self._mini_modal_open = False
+            backup, self._mini_modal_backup = self._mini_modal_backup, None
+            if backup:
+                x, y, w, h = backup
+                run_in_main(lambda: (self.mini.move(x, y), self.mini.resize(w, h)))
+            else:
+                h = max(56, int((self.cfg.get("window") or {}).get("miniHeight") or 94))
+                run_in_main(lambda: self.mini.resize(int(self.mini.width), h))
+            return True
+        if (self.cfg.get("mode") or "overlay") != "mini":
+            return True
+        if on:
+            try:
+                self._mini_modal_backup = (int(self.mini.x), int(self.mini.y),
+                                           int(self.mini.width), int(self.mini.height))
+            except Exception:
+                self._mini_modal_backup = None
+                return False
+            self._mini_modal_open = True
+            x, y, w, h = self._mini_modal_backup
+            try:
+                want = int(extra) or MINI_MODAL_EXTRA
+            except Exception:
+                want = MINI_MODAL_EXTRA
+            want = max(60, min(320, want))
+            self._mini_modal_extra = want
+            # 基准高度取"原高度"与"内容自然高度(配置里的 miniHeight)"的较大者:
+            # 否则窗口比内容还矮时,预留区会被内容挤掉,浮层仍会超出窗口。
+            base_h = max(h, int((self.cfg.get("window") or {}).get("miniHeight") or h))
+            grow = base_h + want - h
+            run_in_main(lambda: (self.mini.move(x, y - grow), self.mini.resize(w, h + grow)))
+        else:
+            self._mini_modal_open = False
+            backup, self._mini_modal_backup = self._mini_modal_backup, None
+            if backup:
+                x, y, w, h = backup
+                run_in_main(lambda: (self.mini.move(x, y), self.mini.resize(w, h)))
+            else:
+                # 没有备份记录(例如中途重启):退回按配置高度收好
+                h = max(56, int((self.cfg.get("window") or {}).get("miniHeight") or 94))
+                run_in_main(lambda: self.mini.resize(int(self.mini.width), h))
+        return True
+
+    def set_modal_block(self, on: bool) -> bool:
+        """设置窗口打开/关闭时,通知各窗口切换"手动禁用交互"状态(问题7)。
+
+        设置是模态的:打开期间主界面不应该还能点(否则用户会在设置与主界面之间
+        来回误操作)。这里只禁用输入,不改可见性,也不打断正在跑的识别流程。
+        """
+        self._modal_block = bool(on)
+        self.push({"type": "modalBlock", "value": bool(on)})
+        return True
+
     def open_settings(self):
         win = self._ensure_settings()
 
@@ -847,9 +933,13 @@ class App:
                 pass
 
         run_in_main(do)
+        # 主界面进入"禁用交互"状态,直到设置窗口关闭
+        self.set_modal_block(True)
         self.maybe_guide("settings", delay=1.2)
 
     def close_settings(self):
+        # 无论设置窗是否已创建,都要先解除主界面的输入禁用
+        self.set_modal_block(False)
         if self.settings is None:
             return
         # 关闭即销毁:设置窗口是重页面(实测常驻约 +170MB),下次打开再按需创建
@@ -885,13 +975,25 @@ class App:
         self._destroy_window("snip")
 
     def finish_snip(self, sel: dict, action: str = "run", question: str = ""):
-        """完成框选:隐藏遮罩 → 抓取区域 → 识别 / 翻译 / 设为悬浮窗区域。"""
+        """完成框选:隐藏遮罩 → 抓取区域 → 识别 / 翻译 / 设为悬浮窗区域。
+
+        兼容两种前端调用:新版 ``finish_snip(sel, action, question)``,以及旧版把
+        action 放进 sel、把提问当作第二个参数。否则会出现"点「翻译此区域」却只做了
+        默认识别""这一类动作丢失。
+        """
+        sel, action, question = normalize_snip_args(sel, action, question)
         dpr = float(sel.get("dpr") or 1)
-        vs = virtual_screen()
-        left = int(vs["left"] + sel["x"] * dpr)
-        top = int(vs["top"] + sel["y"] * dpr)
-        w = int(sel["w"] * dpr)
-        h = int(sel["h"] * dpr)
+        # 框选页报告的是相对遮罩窗口客户区的 CSS 坐标,换算成屏幕物理像素时必须以
+        # 遮罩窗口的真实客户区原点为基准(遮罩按虚拟桌面 origin / 缩放比摆放,直接
+        # 用 virtual_screen 会因取整而整体偏 1~2 像素)。
+        origin = physical_origin(self.snip)
+        if origin is None:
+            vs = virtual_screen()
+            origin = (int(vs["left"]), int(vs["top"]))
+        left = int(round(origin[0] + float(sel.get("x", 0)) * dpr))
+        top = int(round(origin[1] + float(sel.get("y", 0)) * dpr))
+        w = max(2, int(round(float(sel.get("w", 0)) * dpr)))
+        h = max(2, int(round(float(sel.get("h", 0)) * dpr)))
 
         if self.snip is not None:
             run_in_main(lambda: self.snip.hide())
@@ -908,7 +1010,7 @@ class App:
             win_cfg["holeHeight"] = max(120, h)
             self.cfg["mode"] = "overlay"
             cfgmod.save_config(self.cfg)
-            self.push({"type": "status", "text": "已设为悬浮窗区域", "tone": "ok"})
+            self.push({"type": "notice", "text": "已设为悬浮窗区域", "tone": "ok"})
             # 窗口尺寸 = 洞口 + 标题栏/底部面板:由前端按实际渲染高度换算后调用 resize_main
             self.push({"type": "config", "config": self.cfg, "applyHole": True})
 
@@ -944,19 +1046,6 @@ class App:
             self._run(png, question)
 
     # ================= 翻译模式 =================
-    def run_capture_last(self, question: str = ""):
-        """复用上次框选区域直接识别(迷你条快速识别);没有记录则进入框选。"""
-        rect = (self.cfg.get("capture") or {}).get("last_rect")
-        if not rect:
-            self.start_snip()
-            return
-        try:
-            png = grab_region(int(rect["left"]), int(rect["top"]), int(rect["w"]), int(rect["h"]))
-        except CaptureError as exc:
-            self.push({"type": "error", "text": str(exc)})
-            return
-        self._run(png, question)
-
     def run_translate(self, question: str = ""):
         """重新捕获上一次框选区域并翻译(翻译模式的主操作)。"""
         rect = (self.cfg.get("capture") or {}).get("last_rect")
@@ -1042,16 +1131,25 @@ class App:
 
     # ================= 识别流程 =================
     def run_pipeline_rect(self, rect: dict, question: str = ""):
-        """按悬浮窗内洞口的 CSS 矩形截屏(换算为屏幕物理像素)。"""
+        """按悬浮窗内洞口的 CSS 矩形截屏(换算为屏幕物理像素)。
+
+        关键:``win.x`` / ``win.y`` 是**逻辑像素(DIP)**,抓屏需要**物理像素**。
+        在 125% / 150% 缩放的屏幕上把二者相加会让捕获区域整体偏移(窗口越靠
+        右下偏得越多),因此这里用 ClientToScreen 取客户区原点的真实物理坐标。
+        """
         win = self.overlay
         dpr = float(rect.get("dpr") or 1)
-        try:
-            left = int(win.x + rect["x"] * dpr)
-            top = int(win.y + rect["y"] * dpr)
-        except Exception:
-            left = top = 0
-        w = int(rect["w"] * dpr)
-        h = int(rect["h"] * dpr)
+        origin = physical_origin(win)
+        if origin is None:
+            self.push({"type": "error", "text": "无法确定窗口位置,截图失败:请重试或切换模式"})
+            return
+        left = int(round(float(origin[0]) + float(rect.get("x", 0)) * dpr))
+        top = int(round(float(origin[1]) + float(rect.get("y", 0)) * dpr))
+        w = int(round(float(rect.get("w", 0)) * dpr))
+        h = int(round(float(rect.get("h", 0)) * dpr))
+        if w < 8 or h < 8:
+            self.push({"type": "error", "text": "捕获区域过小:请把洞口调大一些再试"})
+            return
 
         self.push({"type": "hideBorder", "value": True})
         time.sleep(max(0.05, int(self.cfg["capture"].get("flash_delay_ms", 80)) / 1000.0))
@@ -1067,6 +1165,9 @@ class App:
     def _run(self, png: bytes, question: str = "", task: str = "answer"):
         with self._lock:
             if self._worker and self._worker.is_alive():
+                # 必须回一个 busy=false,否则前端按钮会一直停在「处理中」
+                self.push({"type": "busy", "value": False})
+                self.push({"type": "status", "text": "上一个任务还在处理中,请稍候", "tone": "warn"})
                 return
             prov = cfgmod.active_provider(self.cfg)
             ocr_mode = self.cfg.get("ocr", {}).get("mode", "cloud")
@@ -1156,22 +1257,62 @@ class App:
 
     # ================= 全局快捷键 =================
     def _register_hotkeys(self):
+        """按配置注册全局快捷键(改键后由 reload_hotkeys 重新调用)。"""
         hk = self.cfg.get("hotkeys") or {}
         mapping = {
             hk.get("capture", "ctrl+f1"): self._hotkey_capture,
             hk.get("snip", "ctrl+shift+a"): lambda: self.start_snip(),
-            "ctrl+1": lambda: self.set_mode("overlay"),
-            "ctrl+2": lambda: self.set_mode("mini"),
-            "ctrl+3": lambda: self.set_mode("snip"),
+            hk.get("modeOverlay", "ctrl+1"): lambda: self.set_mode("overlay"),
+            hk.get("modeMini", "ctrl+2"): lambda: self.set_mode("mini"),
+            hk.get("modeSnip", "ctrl+3"): lambda: self.set_mode("snip"),
+            hk.get("modeTranslate", "ctrl+4"): lambda: self.set_mode("translate"),
+            hk.get("topmost", "ctrl+t"): self.toggle_topmost,
             hk.get("exit", "ctrl+q"): self.request_quit,
         }
         try:
             import keyboard
+            # 先摘掉上次注册的键:否则改快捷键后旧键仍然生效,反复进入还会叠加多份回调
+            for combo in self._hotkeys:
+                try:
+                    keyboard.remove_hotkey(combo)
+                except Exception:
+                    pass  # 旧键可能已失效或被系统回收:注销失败不影响后续注册
+            self._hotkeys = ()
+            registered = []
             for combo, fn in mapping.items():
-                if combo:
+                combo = str(combo or "").strip().lower()
+                if not combo or combo in registered:
+                    continue
+                try:
                     keyboard.add_hotkey(combo, lambda f=fn: threading.Thread(target=f, daemon=True).start())
+                    registered.append(combo)
+                except Exception:
+                    continue  # 该组合被其它程序占用时只跳过它,不影响其余热键
+            self._hotkeys = tuple(registered)
         except Exception:
             pass  # 权限/环境不支持时静默降级
+
+    def toggle_topmost(self) -> bool:
+        """切换所有模式窗口的置顶状态(快捷键与前端按钮共用)。"""
+        win_cfg = self.cfg.setdefault("window", {})
+        on = not bool(win_cfg.get("always_on_top", True))
+        win_cfg["always_on_top"] = on
+
+        def do():
+            for win in (self.overlay, self.mini, self.translate):
+                try:
+                    if win is not None:
+                        win.on_top = on
+                except Exception:
+                    pass  # 置顶设置失败属外观问题:不打断用户当前操作
+            # pywebview 设置 on_top 会无条件 show(),这里再按当前模式校正一次可见性
+            self._sync_visibility()
+
+        run_in_main(do)
+        cfgmod.save_config(self.cfg)
+        self.push({"type": "notice", "text": "已置顶" if on else "已取消置顶", "tone": "ok"})
+        self.push({"type": "config", "config": self.cfg})
+        return on
 
     def _hotkey_capture(self):
         if self.cfg.get("mode") == "mini":
@@ -1187,9 +1328,19 @@ class App:
             self.quit_app()
         elif action in ("tray", "minimize"):
             self.minimize_app()
+        elif (self.cfg.get("mode") or "overlay") == "mini":
+            # 迷你条只有约 80px 高,放大弹窗会把它撑开且回不去。
+            # 改为:在迷你条**上方**弹一个独立浮层(前端绘制,配合窗口临时留高)。
+            self._quit_pending = "mini"
+            self.push({"type": "quitHint", "where": "mini"})
         else:
-            # 只在当前显示的模式窗口里弹询问框
-            self.push({"type": "confirmQuit"})
+            # 只在当前显示的模式窗口里弹询问框。
+            # 这里显式带上目标模式:前端不能依赖 cfg.mode 判断 —— 配置广播到达
+            # 各窗口有延迟,窗口刚显示/刚切模式时 cfg.mode 还可能是旧值,
+            # 于是 confirmQuit 会被守卫拦下,表现为"退出按钮没反应"。
+            target = self.cfg.get("mode") or "overlay"
+            self._quit_pending = target
+            self.push({"type": "confirmQuit", "mode": target})
 
     def minimize_app(self):
         """最小化到系统托盘(通知区域):隐藏窗口,程序继续在后台运行。
@@ -1215,7 +1366,7 @@ class App:
                     pass
 
             run_in_main(do_min)
-            self.push({"type": "status", "text": "已最小化到任务栏(Ctrl+1/2/3 可再次唤出)", "tone": "idle"})
+            self.push({"type": "notice", "text": "已最小化到任务栏(Ctrl+1/2/3 可再次唤出)", "tone": "idle"})
             return
         self._in_tray = True
 
@@ -1240,7 +1391,33 @@ class App:
                 pass
 
         run_in_main(do_hide)
-        self.push({"type": "status", "text": "已最小化到托盘,程序在后台运行", "tone": "idle"})
+        self.push({"type": "notice", "text": "已最小化到托盘,程序在后台运行", "tone": "idle"})
+
+    def quit_pending(self) -> str:
+        """待处理的退出确认目标模式(空串=无),供前端切模式/挂载时回拉。"""
+        return str(self._quit_pending or "")
+
+    def clear_quit_pending(self) -> bool:
+        """用户已处理(选择或取消)退出确认。"""
+        self._quit_pending = ""
+        return True
+
+    def clear_quit_pending_for(self, mode: str) -> bool:
+        """只清除指定模式的未决标记(避免一个窗口的取消动作影响其它窗口)。"""
+        if str(self._quit_pending or "") == str(mode or ""):
+            self._quit_pending = ""
+        return True
+
+    def open_quit_dialog_in_main(self) -> bool:
+        """从迷你条的退出提示跳到悬浮窗(入口引导)。
+
+        退出动作本身在迷你条的提示浮层里已经可以完成(托盘/关闭),
+        这里只做"到主界面去"的模式切换,不再额外弹一次确认。
+        """
+        self._quit_pending = ""
+        self.set_mode("overlay")
+        self.push({"type": "notice", "text": "已切到悬浮窗;再点右上角电源键可退出", "tone": "idle"})
+        return True
 
     def restore_app(self):
         """从托盘恢复显示(托盘图标点击 / 菜单 / 全局快捷键)。"""
@@ -1266,7 +1443,7 @@ class App:
                 pass
 
         run_in_main(do_show)
-        self.push({"type": "status", "text": "已从托盘恢复", "tone": "ok"})
+        self.push({"type": "notice", "text": "已从托盘恢复", "tone": "ok"})
         return True
 
     def _show_tray(self) -> bool:
@@ -1308,7 +1485,7 @@ class App:
                 self._tray.show()
                 box["ok"] = True
             except Exception as e:
-                self.push({"type": "status", "text": f"托盘不可用:{e}", "tone": "warn"})
+                self.push({"type": "notice", "text": f"托盘不可用:{e}", "tone": "warn"})
 
         run_in_main(do)
         time.sleep(0.35)   # 等主线程建好后再返回可用性
@@ -1363,6 +1540,7 @@ class App:
             subprocess.Popen(["explorer", path])
 
     def resize_overlay(self, w: int, h: int) -> bool:
+        """悬浮窗整体尺寸(逻辑/CSS 像素)。洞口尺寸由前端实测后用 set_hole_region 上报。"""
         w, h = max(360, int(w)), max(260, int(h))
         run_in_main(lambda: self.overlay.resize(w, h))
         self.cfg["window"]["width"] = w

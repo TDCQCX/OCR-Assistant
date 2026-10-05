@@ -292,7 +292,7 @@ export default function Guide({ mode, open, onClose }) {
           {idx > 0 && (
             <button type="button" className="ctl !h-7 !px-2.5 !text-[12px]" onClick={prev}>上一步</button>
           )}
-          <button type="button" className="ctl ctl-primary !h-7 !px-3 !text-[12px]" onClick={next}>
+          <button type="button" className="btn btn-primary btn-sm !h-7 !px-3 !text-[12px]" onClick={next}>
             {last ? '开始使用' : '下一步'}
           </button>
         </div>

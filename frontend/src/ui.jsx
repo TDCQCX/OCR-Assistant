@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { call } from './bridge'
 
 /* ============================ 扁平图标(纯 CSS/SVG,无 emoji) ============================ */
@@ -86,6 +86,28 @@ export function useSmallWindow() {
   return small
 }
 
+/**
+ * 悬浮提示。
+ *
+ * 位置策略(问题17):四个方向都试一遍,按"能完整放下 + 不压住洞口 + 离触发点近"
+ * 打分择优,而不是原来的"先上后下"。悬浮窗的洞口是被 SetWindowRgn 从窗口里挖掉的,
+ * 提示画在洞口范围内既看不见也点不到,因此必须主动避开。
+ */
+function holeRect() {
+  const el = document.querySelector('[data-guide="hole"]')
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  if (r.width < 8 || r.height < 8) return null
+  return r
+}
+
+function overlapArea(a, b) {
+  if (!a || !b) return 0
+  const w = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+  const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+  return w > 0 && h > 0 ? w * h : 0
+}
+
 export function Tip({ text, side = 'top', children }) {
   const wrap = useRef(null)
   const tip = useRef(null)
@@ -98,22 +120,50 @@ export function Tip({ text, side = 'top', children }) {
     const t = tip.current
     if (!w || !t) return
     const wr = w.getBoundingClientRect()
-    const tw = t.offsetWidth
-    const th = t.offsetHeight
+    const tw = Math.max(1, t.offsetWidth)
+    const th = Math.max(1, t.offsetHeight)
     const vw = window.innerWidth
     const vh = window.innerHeight
     const pad = 6
-    let x = wr.left + wr.width / 2 - tw / 2          // 相对窗口:尽量居中
-    let y = wr.top - th - 6
-    if (y < pad) y = wr.bottom + 6                    // 上方放不下就放下方
-    y = Math.max(pad, Math.min(y, vh - th - pad))     // 夹在窗口内部
-    x = Math.max(pad, Math.min(x, vw - tw - pad))
-    setPos({ left: x, top: y })
+    const gap = 6
+    const hole = holeRect()
+
+    // 候选位置:上 / 下 / 右 / 左(与触发点居中对齐或边缘对齐)
+    const cands = [
+      { key: 'top', left: wr.left + wr.width / 2 - tw / 2, top: wr.top - th - gap },
+      { key: 'bottom', left: wr.left + wr.width / 2 - tw / 2, top: wr.bottom + gap },
+      { key: 'right', left: wr.right + gap, top: wr.top + wr.height / 2 - th / 2 },
+      { key: 'left', left: wr.left - tw - gap, top: wr.top + wr.height / 2 - th / 2 },
+    ]
+    // 用户显式指定时,把它排到最前(仍可被更好的位置替换)
+    cands.sort((a, b) => (a.key === side ? -1 : b.key === side ? 1 : 0))
+
+    let best = null
+    for (const c of cands) {
+      const box = { left: c.left, top: c.top, right: c.left + tw, bottom: c.top + th }
+      const overflow =
+        Math.max(0, pad - box.left) + Math.max(0, pad - box.top) +
+        Math.max(0, box.right - (vw - pad)) + Math.max(0, box.bottom - (vh - pad))
+      const cover = overlapArea(box, hole) / (tw * th)     // 被洞口吃掉的比例
+      const dist = Math.abs(
+        (box.left + box.right) / 2 - (wr.left + wr.right) / 2) +
+        Math.abs((box.top + box.bottom) / 2 - (wr.top + wr.bottom) / 2)
+      // 权重:先保证完整可见,其次不压洞口,最后离触发点近
+      const score = overflow * 100 + cover * 1000 + dist * 0.05
+      if (!best || score < best.score) best = { score, ...c }
+    }
+
+    // 夹进窗口内部(极端情况下宁可压住一点边,也不能跑到窗口外)
+    const left = Math.max(pad, Math.min(best.left, Math.max(pad, vw - tw - pad)))
+    const top = Math.max(pad, Math.min(best.top, Math.max(pad, vh - th - pad)))
+    setPos({ left, top })
   }
+
+  const hide = () => setPos(null)
 
   return (
     <span ref={wrap} className="tip-wrap"
-          onMouseEnter={place} onFocus={place} onMouseLeave={() => setPos(null)}>
+          onMouseEnter={place} onFocus={place} onMouseLeave={hide} onBlur={hide}>
       {children}
       <span ref={tip} className="tip" role="tooltip"
             style={pos ? { left: pos.left, top: pos.top, opacity: 1 } : { visibility: 'hidden' }}>
@@ -166,22 +216,37 @@ export function IconSeg({ value, options, onChange, size = 'md' }) {
   )
 }
 
-/** 云端 / 本地 引擎开关(开=云端,关=本地;文字精简、过渡平滑) */
+/**
+ * 云端 / 本地 引擎开关(问题11)。
+ *
+ * 旧版是一个滑块 + 一段会随状态变化的文字,滑块与文字互相抢位置,视觉很乱。
+ * 新版改为「分段胶囊」:两个选项都常显,选中项用主色高亮,滑动指示条只做 transform
+ * 动画(合成层),语义一眼可读,也不用猜滑块在哪一侧。
+ */
 export function EngineSwitch({ cloud, onChange, label = '', tips = ['云端', '本地'], compact = false }) {
+  const idx = cloud ? 0 : 1
+  const title = label ? `${label}:${cloud ? tips[0] : tips[1]}` : `${cloud ? tips[0] : tips[1]}`
   return (
-    <span className="engine-switch" title={label ? `${label}:${cloud ? tips[0] : tips[1]}` : ''}>
-      <button
-        type="button"
-        className="engine-track"
-        data-cloud={cloud ? '1' : '0'}
-        data-compact={compact ? '1' : '0'}
-        onClick={() => onChange(!cloud)}
-        aria-label={`${label} ${cloud ? tips[0] : tips[1]}`}
-      >
-        <span className="engine-knob" />
-        <span className="engine-text">{cloud ? tips[0] : tips[1]}</span>
-      </button>
+    <span className="engine-switch" title={title}>
       {label && !compact && <span className="engine-label">{label}</span>}
+      <span className="engine-seg" role="radiogroup" aria-label={label || '引擎'}>
+        {/* 滑动指示条:只做 transform,避免逐帧重排 */}
+        <span className="engine-seg-thumb" style={{ transform: `translateX(${idx * 100}%)` }} />
+        {tips.map((txt, i) => (
+          <button
+            key={txt}
+            type="button"
+            role="radio"
+            aria-checked={idx === i}
+            className="engine-seg-item"
+            data-on={idx === i ? '1' : '0'}
+            onClick={() => onChange(i === 0)}
+          >
+            <Icon name={i === 0 ? 'cloud' : 'cpu'} size={12} />
+            <span>{txt}</span>
+          </button>
+        ))}
+      </span>
     </span>
   )
 }
@@ -191,76 +256,60 @@ export function LangPair({ languages, source, target, onChange }) {
   const opts = languages && languages.length ? languages : ['自动检测', '中文']
   return (
     <div className="langpair">
-      <select className="ctl !w-[96px] !h-7 !text-[12px]" value={source}
-              onChange={(e) => onChange(e.target.value, target)}>
-        {opts.map((l) => <option key={l} value={l}>{l}</option>)}
-      </select>
+      <LangSelect value={source} options={opts} title="来源语言"
+                  onChange={(v) => onChange(v, target)} />
       <Tip text="交换语言方向">
-        <button type="button" className="langpair-arrow" onClick={() => onChange(target === '自动检测' ? '自动检测' : target, source === '自动检测' ? '中文' : source)}>
+        <button type="button" className="langpair-arrow" aria-label="交换语言方向"
+                onClick={() => onChange(target === '自动检测' ? '自动检测' : target,
+                                        source === '自动检测' ? '中文' : source)}>
           <Icon name="swap" size={14} />
         </button>
       </Tip>
-      <select className="ctl !w-[96px] !h-7 !text-[12px]" value={target}
-              onChange={(e) => onChange(source, e.target.value)}>
-        {opts.filter((l) => l !== '自动检测').map((l) => <option key={l} value={l}>{l}</option>)}
-      </select>
+      <LangSelect value={target} options={opts.filter((l) => l !== '自动检测')} title="目标语言"
+                  onChange={(v) => onChange(source, v)} />
     </div>
   )
 }
 
-/* ============================ 提问输入(大输入框 + 示例下拉 + 自输入自动保存) ============================ */
-const FALLBACK_PRESETS = [
-  '请回答识别到的内容', '请翻译识别到的内容', '请解释识别到的内容',
-  '请总结识别到的内容的要点', '请搜索并告诉我相关联的内容',
-]
-
-export function QBox({ value, onChange, presets, history, rows = 2, placeholder, className = '', right }) {
-  const [open, setOpen] = useState(false)
-  const list = useMemo(() => {
-    const merged = [...(presets || []), ...(history || [])]
-    const seen = new Set()
-    return merged.filter((q) => q && !seen.has(q) && seen.add(q))
-  }, [presets, history])
-  const box = useRef(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [open])
-
-  const pick = (q) => { onChange(q); setOpen(false) }
-
+/** 主题化语言下拉:保留原生 select 的行为(键盘/滚轮/多语言列表),
+    外观完全走主题令牌,并自绘下拉箭头 —— 之前用的是通用 .ctl,和顶栏其它控件不一致。 */
+function LangSelect({ value, options, onChange, title }) {
   return (
-    <div ref={box} className={`qbox ${className}`}>
-      <textarea
+    <span className="lang-select" title={title}>
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={title}>
+        {options.map((l) => <option key={l} value={l}>{l}</option>)}
+      </select>
+      <span className="lang-caret"><Icon name="chevronDown" size={13} /></span>
+    </span>
+  )
+}
+
+/* ============================ 提问输入(单行输入框,回车提交) ============================ */
+/**
+ * 单行提问输入(问题13)。
+ * 去掉多行 textarea 与「示例提问」下拉按钮;Enter 触发 onSubmit,
+ * 输入内容在失焦时自动记忆(供「设置 → 示例提问」里查看/编辑)。
+ */
+export function QBox({ value, onChange, placeholder, className = '', right, onSubmit, disabled }) {
+  return (
+    <div className={`qbox ${className}`}>
+      <input
+        type="text"
         className="ctl qbox-input"
-        rows={rows}
         value={value}
-        placeholder={placeholder || '输入你的提问/指令(可直接写:请翻译、请解释、请总结…)留空则使用默认指令'}
+        disabled={disabled}
+        placeholder={placeholder || '输入提问/指令(可直接写:请翻译、请解释、请总结…)留空则使用默认指令'}
         onChange={(e) => onChange(e.target.value)}
         onBlur={() => { if ((value || '').trim()) call('remember_question', value.trim()) }}
+        onKeyDown={(e) => {
+          // 输入法组合中(isComposing / keyCode 229)不触发,避免中文输入被回车打断
+          if (e.key === 'Enter' && onSubmit && !e.nativeEvent?.isComposing && e.keyCode !== 229) {
+            e.preventDefault()
+            onSubmit()
+          }
+        }}
       />
-      <div className="qbox-side">
-        {right}
-        <Tip text="示例提问">
-          <button type="button" className="qbox-more" onClick={() => setOpen(!open)} aria-label="示例提问">
-            <Icon name="list" size={15} />
-          </button>
-        </Tip>
-      </div>
-      {open && (
-        <div className="qbox-menu">
-          <div className="qbox-menu-title">示例提问(点击填入;自己输入的内容会自动记住)</div>
-          {(list.length ? list : FALLBACK_PRESETS).map((q) => (
-            <button key={q} type="button" className="qbox-menu-item" onClick={() => pick(q)}>
-              <Icon name="wand" size={13} />
-              <span className="truncate">{q}</span>
-            </button>
-          ))}
-        </div>
-      )}
+      {right && <div className="qbox-side">{right}</div>}
     </div>
   )
 }
@@ -363,7 +412,9 @@ export function ResizeHandles({ which, onStart, edges }) {
     call('resize_end', which)
   }
   const common = { onPointerMove: move, onPointerUp: end, onPointerCancel: end, onLostPointerCapture: end }
-  const list = edges && edges.length ? edges : EDGES
+  // 显式传空数组 = 不要任何缩放热区(悬浮窗已取消拖边缩放);未传才用全部边角
+  const list = Array.isArray(edges) ? edges : EDGES
+  if (!list.length) return null
   return (
     <>
       {list.map((edge) => (
@@ -388,21 +439,24 @@ export function ModelTiers({ kind, tiers, current, onSelect, onDownload, onRemov
         const active = current === t.key
         return (
           <div key={t.key} className={`tier-card ${active ? 'tier-card-active' : ''}`}>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="tier-radio" data-on={active ? '1' : '0'} />
               <span className="font-semibold text-[13px]">{t.name}</span>
               {t.recommend && <span className="chip">推荐</span>}
+              {active && <span className="chip" style={{ color: 'var(--c-accent)', borderColor: 'var(--c-accent)' }}>当前</span>}
               <span className="chip">{t.size_mb} MB</span>
               <span className="flex-1" />
               {t.ready
                 ? <span className="chip" style={{ color: 'var(--c-ok)', borderColor: 'var(--c-ok)' }}>已下载{t.size_on_disk ? ` · ${t.size_on_disk}MB` : ''}</span>
                 : <span className="chip" style={{ color: 'var(--c-warn)', borderColor: 'var(--c-warn)' }}>未下载</span>}
             </div>
-            <div className="hint mt-1 leading-snug">
-              速度:{t.speed} · 准确度:{t.quality}
+            {/* 规格用两列网格:数值纵向对齐,比用「·」串成一行更好比较 */}
+            <div className="hint mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 leading-snug">
+              <div>速度 {t.speed}</div>
+              <div>准确度 {t.quality}</div>
+              <div>代价 {t.cost}</div>
+              {t.covered && <div className="truncate" title={t.covered}>覆盖 {t.covered}</div>}
             </div>
-            <div className="hint mt-0.5 leading-snug">代价:{t.cost}</div>
-            {t.covered && <div className="hint mt-0.5 leading-snug">覆盖:{t.covered}</div>}
             <div className="flex items-center gap-2 mt-2">
               <Btn className="!h-7 !text-[12px]" disabled={active} onClick={() => onSelect(t.key)}>
                 {active ? '当前使用' : '选为当前档位'}
@@ -452,10 +506,11 @@ export function DownloadHost({ children }) {
   }
   const close = () => setReq(null)
 
-  // 下载确认弹窗居中,会压在"被挖掉的洞口区域"上 → 打开期间临时取消洞口穿透
+  // 下载确认弹窗居中:打开期间取消洞口穿透(否则被裁掉),并让迷你条临时腾出空间
   useEffect(() => {
     call('pause_hole', !!req)
-    return () => { if (req) call('pause_hole', false) }
+    call('set_modal_room', !!req)
+    return () => { if (req) { call('pause_hole', false); call('set_modal_room', false) } }
   }, [req])
 
   const tiers = data?.tiers?.[req?.kind] || []
@@ -467,8 +522,9 @@ export function DownloadHost({ children }) {
       {children}
       {req && (
         <div className="modal-mask" onClick={close}>
-          <div className="modal-card !w-[520px] max-h-[86vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2.5 mb-2.5">
+          {/* 头尾固定、中间滚动:模型档位多时不用整窗滚动,操作按钮始终可见 */}
+          <div className="modal-card modal-sheet !w-[520px]" onClick={(e) => e.stopPropagation()}>
+            <header className="modal-sheet-head">
               <span className="card-icon"><Icon name="download" size={15} /></span>
               <div className="min-w-0">
                 <div className="font-semibold">{KIND_TITLE[req.kind] || '端侧模型'}</div>
@@ -478,8 +534,9 @@ export function DownloadHost({ children }) {
                     : '模型不随应用分发,首次使用需联网下载一次;可随时在设置里换档或删除'}
                 </div>
               </div>
-            </div>
+            </header>
 
+            <div className="modal-sheet-body">
             {req.kind === 'mt' && (
               <div className="inset px-3 py-2 mb-2 text-[12px]">
                 <b>准确度提示</b>:端侧专用翻译模型(opust-mt int8)质量中等,适合"看懂大意";
@@ -491,7 +548,9 @@ export function DownloadHost({ children }) {
               <>
                 <ModelTiers kind={req.kind} tiers={tiers} current={current}
                             busyTier={busyTier}
-                            onSelect={(t) => call('set_local_tier', req.kind, t).then(load)}
+                            onSelect={(t) => call('set_local_tier', req.kind, t)
+                              .then(() => load())
+                              .then(() => req.onSelect && req.onSelect(t))}
                             onDownload={(t) => { setBusyTier(t); call('download_local_model', req.kind, t) }}
                             onRemove={(t) => call('remove_local_model', req.kind, t).then((m) => { load(); if (req.onDone) req.onDone() })} />
                 {req.kind === 'runtime' && (
@@ -527,14 +586,21 @@ export function DownloadHost({ children }) {
                 </div>
               </>
             ) : <div className="hint py-3 text-center">正在读取端侧模型状态…</div>}
+            </div>
 
-            <div className="flex items-center gap-2 mt-3">
+            <footer className="modal-sheet-foot">
               <span className="hint flex-1">
                 {req.kind === 'ocr' ? '识别档位影响小字/表格的识别率;均衡档为推荐值'
-                  : '下载完成后会自动切换到端侧'}
+                  : '选好档位后点「用这个档位」即可切到端侧'}
               </span>
+              {req.kind === 'mt' && (
+                <Btn primary disabled={!(data?.mt_tier_ready)} onClick={() => {
+                  close()
+                  if (req.onDone) req.onDone()
+                }}>用这个档位</Btn>
+              )}
               <Btn onClick={close}>关闭</Btn>
-            </div>
+            </footer>
           </div>
         </div>
       )}
@@ -564,14 +630,15 @@ export function Card({ title, icon, desc, right, children, className = '' }) {
   return (
     <section className={`card p-3.5 animate-fadein ${className}`}>
       {(title || right) && (
-        <header className="flex items-center gap-2.5 mb-3">
+        <header className="flex items-start gap-2.5 mb-3">
           {icon && <span className="card-icon"><Icon name={icon} size={15} /></span>}
           <div className="min-w-0">
-            {title && <h3 className="font-semibold text-[13.5px] truncate">{title}</h3>}
-            {desc && <p className="hint mt-0.5">{desc}</p>}
+            {title && <h3 className="font-semibold text-[13.5px] leading-tight truncate">{title}</h3>}
+            {desc && <p className="hint mt-1 leading-snug">{desc}</p>}
           </div>
           <div className="flex-1" />
-          <div className="flex items-center gap-2">{right}</div>
+          {/* 右上操作在窄窗口下换行,避免把标题挤没 */}
+          <div className="flex items-center gap-2 flex-wrap justify-end">{right}</div>
         </header>
       )}
       {children}
@@ -594,16 +661,23 @@ export function Switch({ checked, onChange, label, hint }) {
     <label className="flex items-center gap-3 cursor-pointer">
       <button
         type="button"
+        role="switch"
+        aria-checked={!!checked}
         onClick={() => onChange(!checked)}
-        className="w-11 h-6 rounded-full border transition-colors relative shrink-0"
+        className="w-11 h-6 rounded-full border relative shrink-0 transition-colors"
         style={{
           background: checked ? 'var(--c-accent)' : 'var(--c-sub)',
           borderColor: checked ? 'var(--c-accent)' : 'var(--c-line)',
         }}
       >
+        {/* 用 transform 滑动:合成层动画,不触发布局 */}
         <span
-          className="absolute top-[2px] w-[18px] h-[18px] rounded-full transition-all"
-          style={{ left: checked ? 22 : 2, background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,.28)' }}
+          className="absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full will-change-transform"
+          style={{
+            background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.28)',
+            transform: `translateX(${checked ? 20 : 0}px)`,
+            transition: 'transform var(--dur-2) var(--ease-out)',
+          }}
         />
       </button>
       {(label || hint) && (
@@ -641,7 +715,7 @@ export function Segmented({ value, options, onChange, size = 'md' }) {
 
 export function Field({ label, hint, children, width = 130 }) {
   return (
-    <div className="inset px-3 py-2">
+    <div className="inset px-3 py-2.5">
       <div className="flex items-start gap-3">
         <div className="shrink-0 pt-1.5" style={{ width }}>
           <div className="font-medium">{label}</div>

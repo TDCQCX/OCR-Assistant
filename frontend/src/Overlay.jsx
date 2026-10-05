@@ -3,7 +3,10 @@ import { call } from './bridge'
 import { useApp } from './main'
 import QuitDialog from './QuitDialog'
 import Guide, { useGuide } from './Guide'
-import { Btn, Collapse, EngineSwitch, Icon, IconBtn, IconSeg, Logo, Pill, QBox, ResizeHandles, Tip, useDownloader, useSmallWindow, useToast, useWindowDrag } from './ui'
+import { Btn, EngineSwitch, Icon, IconBtn, IconSeg, Logo, Pill, QBox, ResizeHandles, Tip, useDownloader, useSmallWindow, useToast, useWindowDrag } from './ui'
+
+/** 端侧识别档位的显示名(与 app/local_models.py 的 OCR_TIERS 一致) */
+const LOCAL_TIER_NAMES = { light: '端侧·轻量', balanced: '端侧·均衡', full: '端侧·全量' }
 
 const MODES = [
   { value: 'overlay', label: '悬浮窗', icon: 'overlay' },
@@ -22,7 +25,6 @@ export default function Overlay() {
   const dragFooter = useWindowDrag('overlay')
   const { question, setQuestion } = app  // 全局共享:各模式输入框内容保持同步
   const [borderHidden, setBorderHidden] = useState(false)
-  const [size, setSize] = useState({ w: cfg.window?.width || 640, h: cfg.window?.height || 680 })
   const [topmost, setTopmost] = useState(cfg.window?.always_on_top !== false)
   const small = useSmallWindow()
   const guide = useGuide('overlay')
@@ -31,15 +33,20 @@ export default function Overlay() {
     call('last_result').then((r) => { if (r && (r.answer || r.ocr_text)) app.setResult(r) })
   }, [])
 
-  // 顶部只显示当前模型与状态:直接由 cfg 派生,设置窗口改动后会随 config 事件立即刷新
+  // 顶部只显示当前模型与状态:直接由 cfg 派生,设置窗口改动后会随 config 事件立即刷新。
+  // 问题12:云端/本地开关切换时,这里显示的内容必须跟着变 ——
+  //   云端 → 当前平台填的模型 ID;本地 → 端侧识别模型(与云端无关)。
   const curProv = (cfg.providers || []).find((p) => p.id === cfg.active_provider) || {}
-  const modelName = curProv.model || curProv.name || '未选择模型'
-  const modelReady = !!(curProv.api_key || '').trim()
+  const ocrCloudNow = (cfg.ocr?.mode || 'cloud') === 'cloud'
+  const cloudModelName = curProv.model || curProv.name || '未选择模型'
+  const localModelName = cfg.local?.ocr_tier_name || LOCAL_TIER_NAMES[cfg.local?.ocr_tier] || '端侧识别'
+  const modelName = ocrCloudNow ? cloudModelName : localModelName
+  // 本地模式不需要 API Key,只要有模型档位就算就绪
+  const modelReady = ocrCloudNow ? !!(curProv.api_key || '').trim() : true
 
   // 把洞口(OCR 区域)几何上报后端,用于把该区域从窗口"输入/绘制区域"中挖掉 → 鼠标可穿透
   const reportRef = useRef(() => {})
-  const chromeRef = useRef(cfg.window?.chromeHeight || 300)
-  const editingRef = useRef(false)
+  const chromeRef = useRef(cfg.window?.chromeHeight || 240)
   const wantHoleRef = useRef(null)   // 目标洞口尺寸(收敛式调整,抵消面板高度变化)
   const triesRef = useRef(0)
   useEffect(() => {
@@ -60,8 +67,12 @@ export default function Overlay() {
         h: Math.max(0, r.height - 2 * bw) * dpr,
         innerH: window.innerHeight * dpr,
         innerW: window.innerWidth * dpr,
+        // chromeCss 用 CSS 像素上报:后端拿它换算"洞口尺寸 -> 窗口尺寸",
+        // 若按物理像素上报会因缩放比而算高(125% 下多出 25%)。保持单位单一来源。
+        // 用布局尺寸(offsetHeight,含边框)算:实机核对 header+footer+洞口 = innerHeight
+        chromeCss: Math.max(0, window.innerHeight - r.height),
       })
-      // 目标洞口尺寸收敛:面板(尤其底部)高度会随内容换行变化,单次换算会偏小
+      // 洞口尺寸收敛:仅用于"设为悬浮窗区域"时按目标洞口大小换算窗口尺寸
       const want = wantHoleRef.current
       if (want) {
         const off = Math.abs(r.width - want.w) > 3 || Math.abs(r.height - want.h) > 3
@@ -73,10 +84,6 @@ export default function Overlay() {
           wantHoleRef.current = null
           triesRef.current = 0
         }
-      } else if (!editingRef.current && r.width > 40 && r.height > 40) {
-        // 拖边缩放后同步洞口尺寸输入框
-        setSize((s) => (Math.abs(s.w - Math.round(r.width)) > 2 || Math.abs(s.h - Math.round(r.height)) > 2
-          ? { w: Math.round(r.width), h: Math.round(r.height) } : s))
       }
     }
     reportRef.current = report
@@ -98,12 +105,9 @@ export default function Overlay() {
         const holeW = ev.config?.window?.holeWidth
         const holeH = ev.config?.window?.holeHeight
         if (ev.applyHole && holeW && holeH) {
-          // holeWidth/holeHeight 存的是物理像素,而输入框与 resize_main 用的是 CSS 像素
+          // holeWidth/holeHeight 存物理像素;resize_main 用 CSS 像素,这里换算后收敛
           const k = window.devicePixelRatio || 1
-          const cssW = Math.round(holeW / k)
-          const cssH = Math.round(holeH / k)
-          setSize({ w: cssW, h: cssH })
-          wantHoleRef.current = { w: cssW, h: cssH }
+          wantHoleRef.current = { w: Math.round(holeW / k), h: Math.round(holeH / k) }
           triesRef.current = 0
           setTimeout(() => reportRef.current(), 60)
         }
@@ -119,16 +123,14 @@ export default function Overlay() {
   const run = () => {
     const q = question.trim()
     if (!q) toast(`未填写提问,将按默认指令执行:${defaultQuestion}`)
-    const r = holeRef.current.getBoundingClientRect()
-    call('run_pipeline_rect', { x: r.x, y: r.y, w: r.width, h: r.height, dpr: window.devicePixelRatio }, q)
-  }
-
-  // 输入框填报的是"洞口尺寸":窗口尺寸 = 洞口 + 标题栏/底部面板(并做收敛校正)
-  const resize = async (w, h) => {
-    setSize({ w, h })
-    wantHoleRef.current = { w, h }
-    triesRef.current = 0
-    await call('resize_main', w, h + chromeRef.current)
+    // 用 offset*(布局尺寸)而不是 getBoundingClientRect:切换动画的 transform 会让
+    // rect 带上偏移,截出来的区域就会整体位移几像素。
+    const el = holeRef.current
+    const r = {
+      x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight,
+      dpr: window.devicePixelRatio,
+    }
+    call('run_pipeline_rect', r, q)
   }
 
   const toggleTop = async () => {
@@ -177,32 +179,64 @@ export default function Overlay() {
   }, [modelReady])
 
   const modeTone = { idle: 'ok', working: 'warn', ok: 'ok', danger: 'danger' }[status.tone] || 'muted'
+  const ocrCloud = (cfg.ocr?.mode || 'cloud') === 'cloud'
+
+  // 顶栏密度:宽窗口单行居中;窄窗口先收起模式文字、再折成两行,避免控件互相压住。
+  // (这类问题只能靠实测宽度决定,写死一个值会在不同字号/主题下失效)
+  const [density, setDensity] = useState('full')
+  useEffect(() => {
+    const on = () => {
+      const w = window.innerWidth
+      const k = Number(cfg.ui?.fontSize ?? 13) / 13          // 字号越大越早降级
+      const wide = 900 * k
+      const roomy = 640 * k        // 低于 640 才折行;640-900 靠"收起模式文字"省出空间
+      setDensity(w >= wide ? 'full' : w >= roomy ? 'compact' : 'stacked')
+    }
+    on()
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [cfg.ui?.fontSize])
 
   return (
-    <div className="h-full flex flex-col overflow-hidden mode-enter relative">
+    <div className="window-shell view-overlay h-full flex flex-col overflow-hidden mode-enter relative"
+         style={{ background: 'var(--c-bg)' }}>
+      {/* 窗口可拖边缩放(问题1:之前误把缩放热区一起删了,只该删尺寸输入框)。
+          拖边只改变窗口大小,洞口会随之自适应;缩放结果会写回配置。 */}
       <ResizeHandles which="overlay" onStart={() => { wantHoleRef.current = null }} />
-      {/* ================= 顶部:图标工具栏(可拖动) ================= */}
-      <header className="panel shrink-0 h-10 px-2 flex items-center gap-2 drag-handle" {...dragHeader}>
-        <span className="no-drag" title="OCR 助手"><Logo size={22} /></span>
-        <span data-guide="mode" className="no-drag flex items-center">
-          <IconSeg size="sm" value="overlay" options={MODES} onChange={(m) => app.setMode(m)} />
+      {/* ================= 顶部:单行工具栏(可拖动) =================
+          布局:左=品牌与窗口动作;中=模式切换 + 引擎开关 + 模型名(整体居中);
+          三者都不换行,窄窗口下由模型名先收缩,避免互相压住。 */}
+      <header className="panel shrink-0 h-11 px-2.5 flex items-center gap-2 drag-handle"
+              data-density={density} {...dragHeader}>
+        {/* 左:品牌图标(放大),不参与挤压 */}
+        <span className="toolbar-group shrink-0" title="OCR 助手"><Logo size={28} /></span>
+        {/* 中:模式切换 + 云端/本地 + 模型名。
+             有富余时在「logo 与右侧控件之间」居中;空间不足时靠左排布(向左移动),
+             宁可贴着 logo 也不与右侧控件重叠。 */}
+        <span className="topbar-center flex items-center justify-center gap-2 whitespace-nowrap min-w-0 flex-1">
+          <span data-guide="mode" className="toolbar-group shrink-0">
+            <IconSeg size="sm" value="overlay" options={MODES} onChange={(m) => app.setMode(m)} />
+          </span>
+          <span data-guide="engine" className="flex items-center shrink-0">
+            <EngineSwitch cloud={(cfg.ocr?.mode || 'cloud') === 'cloud'} onChange={toggleOcr}
+                          tips={['云端', '本地']} />
+          </span>
+          <Tip text="点击打开设置,切换模型/平台">
+            <button type="button" className="model-chip no-drag" data-guide="model"
+                    onClick={() => call('open_settings')}>
+              <span className="w-1.5 h-1.5 rounded-full shrink-0"
+                    style={{ background: modelReady ? 'var(--c-ok)' : 'var(--c-warn)' }} />
+              <span className="truncate">{modelName}</span>
+            </button>
+          </Tip>
         </span>
-        <span className="flex-1" />
-        <span data-guide="engine" className="flex items-center no-drag">
-          <EngineSwitch cloud={(cfg.ocr?.mode || 'cloud') === 'cloud'} onChange={toggleOcr}
-                        tips={['云端', '本地']} />
+        {/* 右:窗口动作贴最右,始终可点(按钮之间的空隙仍可拖动窗口) */}
+        <span className="toolbar-group shrink-0">
+          <IconBtn icon="info" tip="新手教程" onClick={() => call('guide_start', 'overlay')} />
+          <IconBtn icon="pin" tip={topmost ? '取消置顶' : '窗口置顶'} active={topmost} onClick={toggleTop} />
+          <IconBtn icon="settings" tip="设置" onClick={() => call('open_settings')} />
+          <IconBtn icon="power" tip="退出(Ctrl+Q)" danger onClick={() => app.quit()} />
         </span>
-        {/* 只显示当前模型与状态,点击进入设置切换 */}
-        <Tip text="点击打开设置,切换模型/平台">
-          <button type="button" className="model-chip no-drag" data-guide="model" onClick={() => call('open_settings')}>
-            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: modelReady ? 'var(--c-ok)' : 'var(--c-warn)' }} />
-            <span className="truncate">{modelName}</span>
-          </button>
-        </Tip>
-        <IconBtn icon="info" tip="新手教程" onClick={() => call('guide_start', 'overlay')} />
-        <IconBtn icon="pin" tip={topmost ? '取消置顶' : '窗口置顶'} active={topmost} onClick={toggleTop} />
-        <IconBtn icon="settings" tip="设置" onClick={() => call('open_settings')} />
-        <IconBtn icon="power" tip="退出(Ctrl+Q)" danger onClick={() => app.quit()} />
       </header>
 
       {/* ================= 中部:透明洞口(鼠标可穿透,可透看后方) ================= */}
@@ -210,7 +244,7 @@ export default function Overlay() {
         <div
           ref={holeRef}
           data-guide="hole"
-          className="w-full h-full"
+          className="hole-frame w-full h-full"
           style={{
             border: borderHidden ? 'none' : `2px ${cfg.ui?.holeStyle || 'dashed'} ${cfg.ui?.holeColor || '#ff5252'}`,
             borderRadius: cfg.ui?.holeRadius ?? 4,
@@ -219,77 +253,94 @@ export default function Overlay() {
       </div>
 
       {/* ================= 底部:操作 + 结果 ================= */}
-      <footer className={`panel shrink-0 border-t px-2.5 space-y-2 ${small ? 'py-1.5' : 'py-2'}`}>
+      <footer className={`panel shrink-0 border-t px-2.5 space-y-2 ${small ? 'py-1.5' : 'py-2.5'}`}>
         <div className="flex items-start gap-2">
           <span data-guide="qbox" className="flex-1 min-w-0">
-            <QBox value={question} onChange={setQuestion} rows={small ? 1 : 2} className="no-drag"
-                  presets={cfg.behavior?.question_presets} history={cfg.behavior?.question_history}
-                  placeholder={`提问/指令(留空则默认:${defaultQuestion})`} />
+            <QBox value={question} onChange={setQuestion} className="no-drag"
+                  onSubmit={run}
+                  placeholder={`提问/指令(Enter 识别;留空则默认:${defaultQuestion})`} />
           </span>
-          <div className="flex flex-col gap-1.5">
+          {/* 操作列:最小宽度保证"识别 ↔ 处理中"切换时宽度稳定,又不至于把文字挤换行 */}
+          <div className="flex flex-col gap-1.5 w-[84px] shrink-0">
             <span data-guide="run">
-              <Btn primary icon="scan" disabled={busy} onClick={run}>{busy ? '处理中' : '识别'}</Btn>
+              <Btn primary icon={busy ? undefined : 'scan'}
+                   className="w-full whitespace-nowrap !px-2" disabled={busy} onClick={run}>
+                {busy ? '处理中' : '识别'}
+              </Btn>
             </span>
             {!small && (
               <Tip text="翻译模式(无洞口,结果区更大)">
-                <Btn icon="translate" onClick={() => app.setMode('translate')}>翻译</Btn>
+                <Btn icon="translate" className="w-full" onClick={() => app.setMode('translate')}>翻译</Btn>
               </Tip>
             )}
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap drag-handle" {...dragFooter}>
-          <Pill tone={modeTone}>{small ? status.text.slice(0, 6) : status.text}</Pill>
-          {!small && result && !result.error && (
-            <>
-              <span className="chip">{result.qtype_name}</span>
-              <span className="chip">来源: {result.source}</span>
-              <span className="chip">OCR: {result.ocr_time?.toFixed(1)}s</span>
-              <span className="chip">回答: {result.answer_time?.toFixed(1)}s</span>
-            </>
-          )}
-          <span className="flex-1" />
           {!small && (
             <>
               <IconBtn icon="snip" tip="重新框选区域(可设为悬浮窗区域)" onClick={() => app.startSnip()} />
               <IconBtn icon="copy" tip="复制回答" onClick={copy} />
               <IconBtn icon="trash" tip="清空结果" onClick={() => app.setResult(null)} />
-              <Icon name="grid" size={14} className="text-muted" />
-              <input type="number" className="ctl !w-14 text-right" value={size.w} title="洞口宽度"
-                     onFocus={() => { editingRef.current = true }}
-                     onChange={(e) => setSize({ ...size, w: +e.target.value })}
-                     onBlur={(e) => { editingRef.current = false; resize(+e.target.value, size.h) }} />
-              <span className="text-muted text-[12px]">×</span>
-              <input type="number" className="ctl !w-14 text-right" value={size.h} title="洞口高度"
-                     onFocus={() => { editingRef.current = true }}
-                     onChange={(e) => setSize({ ...size, h: +e.target.value })}
-                     onBlur={(e) => { editingRef.current = false; resize(size.w, +e.target.value) }} />
             </>
           )}
         </div>
 
         {!small && (
-          <div data-guide="result" className="grid grid-cols-2 gap-2.5 max-h-[28vh] overflow-auto">
-            <Collapse title="识别结果" badge={<span className="hint">{(result?.ocr_text || '').length} 字</span>}>
-              <pre className="whitespace-pre-wrap text-[12px] leading-relaxed inset p-2 max-h-36 overflow-auto">
+          <div data-guide="result" className="result-split max-h-[30vh] overflow-auto pr-0.5">
+            <section className="result-pane">
+              <div className="result-pane-head">
+                <Icon name="image" size={13} />
+                <span>识别结果</span>
+                <span className="flex-1" />
+                <span className="hint">{(result?.ocr_text || '').length} 字</span>
+              </div>
+              <div className="result-body result-body-quiet text-[12px] max-h-40">
                 {result?.ocr_text || '—'}
-              </pre>
-            </Collapse>
-            <Collapse title="回答">
+              </div>
+            </section>
+            <section className="result-pane">
+              <div className="result-pane-head">
+                <Icon name="wand" size={13} />
+                <span>回答</span>
+                <span className="flex-1" />
+                {result?.answer_time > 0 && <span className="hint">{result.answer_time.toFixed(1)}s</span>}
+              </div>
               {result?.error ? (
-                <div className="inset p-2 flex items-start gap-2 text-[12.5px]" style={{ color: 'var(--c-danger)' }}>
-                  <Icon name="alert" size={14} className="mt-0.5" />
-                  <span>{result.error}</span>
+                <div className="result-body result-body-error flex items-start gap-2 text-[12.5px]">
+                  <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
+                  <span className="break-anywhere">{result.error}</span>
                 </div>
               ) : (
-                <pre className="whitespace-pre-wrap text-[13px] leading-relaxed inset p-2 max-h-36 overflow-auto">
+                <div className="result-body text-[13px] max-h-40 selectable">
                   {result?.answer || '—'}
-                </pre>
+                </div>
               )}
-            </Collapse>
+            </section>
           </div>
         )}
       </footer>
+
+      {/* ================= 状态栏(问题7):置于窗口最底部,与翻译模式一致 ================= */}
+      <div className="status-bar" data-guide="status">
+        <Pill tone={modeTone}>{small ? status.text.slice(0, 6) : status.text}</Pill>
+        {!small && (
+          <>
+            <span className="stat-chip">识别 <b>{ocrCloud ? '云端' : '端侧'}</b></span>
+            <span className="stat-chip">模型 <b>{modelName}</b></span>
+            {result && !result.error && (
+              <>
+                <span className="stat-chip">来源 <b>{result.source || '—'}</b></span>
+                <span className="stat-chip">OCR <b>{result.ocr_time?.toFixed(1) || '0.0'}s</b></span>
+                <span className="stat-chip">回答 <b>{result.answer_time?.toFixed(1) || '0.0'}s</b></span>
+                {result.task === 'translate' && <span className="stat-chip">任务 <b>翻译</b></span>}
+              </>
+            )}
+          </>
+        )}
+        <span className="flex-1" />
+        {!small && <span className="hint">Ctrl+F1 识别 · Ctrl+4 翻译</span>}
+      </div>
       <Guide mode="overlay" open={guide.open} onClose={guide.stop} />
       <QuitDialog mode="overlay" />
     </div>

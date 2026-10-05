@@ -58,7 +58,7 @@ function withDerived(colors) {
   return c
 }
 
-/** 把主题(预设或自定义)写入 CSS 变量;ui 用于面板不透明度等附加项 */
+/** 把主题(预设或自定义)写入 CSS 变量;ui 用于面板不透明度、图片背景等附加项 */
 export function applyTheme(theme, ui) {
   const raw = theme?.colors || PRESETS.light.colors
   const c = withDerived(raw)
@@ -75,6 +75,40 @@ export function applyTheme(theme, ui) {
   Object.entries(map).forEach(([k, v]) => v && root.style.setProperty(k, v))
   if (theme?.radius != null) root.style.setProperty('--radius', `${theme.radius}px`)
   if (theme?.fontSize != null) root.style.setProperty('--font-size', `${theme.fontSize}px`)
+  applyBackgroundImage(ui)
+}
+
+/**
+ * 自定义图片背景(问题3):把 ui.bgImage 等写进 CSS 变量。
+ *
+ * 图片用 file:/// URI(由后端 pick_background_image 返回),CSS 才能加载本地文件;
+ * 不透明度 / 模糊 / 平铺方式 / 压暗程度都是独立可调的,避免"一开背景图文字就看不清"。
+ */
+export function applyBackgroundImage(ui) {
+  const root = document.documentElement
+  const src = (ui?.bgImage || '').trim()
+  const fit = ui?.bgImageFit || 'cover'
+  const opacity = Math.max(0, Math.min(100, Number(ui?.bgImageOpacity ?? 100)))
+  const blur = Math.max(0, Math.min(40, Number(ui?.bgImageBlur ?? 0)))
+  const dim = Math.max(0, Math.min(80, Number(ui?.bgImageDim ?? 0)))
+
+  // 在 body 上标记"是否启用背景图":供 CSS 决定面板/卡片要不要半透明
+  try {
+    document.body.classList.toggle('has-bg', !!src)
+  } catch (e) { /* 忽略 */ }
+  root.style.setProperty('--bg-image', src ? `url("${src}")` : 'none')
+  root.style.setProperty('--bg-opacity', src ? String(opacity / 100) : '0')
+  // 只有确实需要模糊时才建滤镜层
+  root.style.setProperty('--bg-blur', `${blur}px`)
+  root.style.setProperty('--bg-filter', src && blur > 0 ? `blur(${blur}px)` : 'none')
+  root.style.setProperty('--bg-dim', String(dim / 100))
+  if (fit === 'repeat') {
+    root.style.setProperty('--bg-fit', 'auto')
+    root.style.setProperty('--bg-repeat', 'repeat')
+  } else {
+    root.style.setProperty('--bg-fit', fit === 'contain' ? 'contain' : 'cover')
+    root.style.setProperty('--bg-repeat', 'no-repeat')
+  }
 }
 
 export function resolveTheme(ui) {
@@ -82,6 +116,13 @@ export function resolveTheme(ui) {
   if (ui?.theme === 'custom' && ui?.customTheme) return ui.customTheme
   return PRESETS[ui?.theme] || PRESETS.light
 }
+
+/** 背景图相关字段(设置页「外观主题」用) */
+export const BG_FITS = [
+  { value: 'cover', label: '填充裁剪' },
+  { value: 'contain', label: '完整显示' },
+  { value: 'repeat', label: '平铺' },
+]
 
 export const COLOR_FIELDS = [
   ['bg', '底色'], ['panel', '面板'], ['card', '卡片'], ['sub', '内嵌区'],
