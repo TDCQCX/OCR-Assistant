@@ -1,6 +1,8 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.mimosa/
 config.json
 config.json.bak
 request_log.json
